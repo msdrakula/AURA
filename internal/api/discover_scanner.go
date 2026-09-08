@@ -1,0 +1,101 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"strings"
+	"time"
+
+	"go.uber.org/zap"
+
+	"meb/internal/discover"
+	"meb/internal/scanner"
+)
+
+// DiscoverRequest is the body for POST /api/discover/run.
+type DiscoverRequest struct {
+	BaseURL      string   `json:"base_url"`
+	Wordlist     []string `json:"wordlist"`
+	WordlistPath string   `json:"wordlist_path"`
+	Workers      int      `json:"workers"`
+	RPS          int      `json:"rps"`
+	Cookies      string   `json:"cookies"`
+}
+
+func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
+	var body DiscoverRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if body.BaseURL == "" {
+		writeErr(w, 400, "base_url is required")
+		return
+	}
+	words, err := s.resolveWords(body.Wordlist, body.WordlistPath, "dirs")
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
+	}
+	if len(words) == 0 {
+		writeErr(w, 400, "wordlist is required")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
+	defer cancel()
+	var onResult func(string, string)
+	if len(words) <= 80 {
+		onResult = func(reqRaw, respRaw string) { s.saveToolFlow(reqRaw, respRaw, "", "discover") }
+	}
+	results, err := discover.Run(ctx, discover.Options{
+		BaseURL: body.BaseURL, Wordlist: words,
+		Workers: body.Workers, RPS: body.RPS, Cookies: body.Cookies,
+		Timeout:  10 * time.Second,
+		OnResult: onResult,
+	}, s.Log)
+	if err != nil && err != context.DeadlineExceeded {
+		s.Log.Warn("discover: run", zap.Error(err))
+		writeErr(w, 500, err.Error())
+		return
+	}
+	if results == nil {
+		results = []discover.Result{}
+	}
+	writeJSON(w, 200, results)
+}
+
+// ScanRequest is the body for POST /api/scanner/scan.
+type ScanRequest struct {
+	Raw    string `json:"raw"`
+	Scheme string `json:"scheme"`
+	Target string `json:"target"`
+}
+
+func (s *Server) scannerRun(w http.ResponseWriter, r *http.Request) {
+	var body ScanRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeErr(w, 400, "invalid JSON: "+err.Error())
+		return
+	}
+	if strings.TrimSpace(body.Raw) == "" {
+		writeErr(w, 400, "raw is required")
+		return
+	}
+	if body.Scheme == "" {
+		body.Scheme = "https"
+	}
+	// Log the baseline scan request.
+	s.saveToolFlow(body.Raw, "", body.Scheme, "scanner")
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	res, err := scanner.Scan(ctx, scanner.Options{
+		Raw: body.Raw, Scheme: body.Scheme, Target: body.Target, Timeout: 15 * time.Second,
+	})
+	if err != nil {
+		s.Log.Warn("scanner: run", zap.Error(err))
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, res)
+}

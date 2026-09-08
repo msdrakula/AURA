@@ -1,0 +1,7 @@
+/meb
+*.db
+*.db-wal
+*.db-shm
+/data/ca/
+/data/leaf/
+/third_party/SecLists/
