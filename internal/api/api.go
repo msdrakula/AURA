@@ -134,10 +134,11 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/wordlists", s.wordlists)
 	mux.HandleFunc("GET /api/wordlists/preview", s.wordlistPreview)
 	mux.HandleFunc("GET /api/logs", s.logs)
+	mux.HandleFunc("POST /api/debug-log", s.debugIngest)
 	mux.HandleFunc("GET /api/ws", s.ws)
 	mux.HandleFunc("GET /{$}", s.index)
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(opts.WebDir, "static")))))
-	return mux
+	mux.Handle("GET /static/", noStore(http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(opts.WebDir, "static"))))))
+	return withDebug(mux)
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -197,7 +198,7 @@ func (s *Server) caCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/x-pem-file")
-	w.Header().Set("Content-Disposition", "attachment; filename=meb-ca.crt")
+	w.Header().Set("Content-Disposition", "attachment; filename=aura-ca.crt")
 	w.WriteHeader(200)
 	_, _ = w.Write(pem)
 }
@@ -426,6 +427,14 @@ func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func noStore(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		h.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, filepath.Join(s.WebDir, "index.html"))
 }

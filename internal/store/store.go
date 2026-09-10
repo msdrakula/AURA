@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"meb/internal/debuglog"
 	"meb/internal/httpio"
 )
 
@@ -155,6 +156,7 @@ func (s *Store) Log(level, message string) {
 	}
 	s.mu.Unlock()
 	s.Emit(map[string]any{"type": "log", "item": item})
+	debuglog.Write(debuglog.Event{Level: level, Src: "runtime", Module: "store", Action: "log", Msg: message})
 }
 
 func (s *Store) AddFlow(flow *Flow) {
@@ -259,13 +261,14 @@ func (s *Store) Intercept(flow *Flow, phase string) string {
 		}
 	}
 	s.Emit(map[string]any{"type": "intercept_done", "id": p.ID})
+	debuglog.Info("proxy", "intercept_done", action, map[string]any{"pending_id": p.ID, "flow_id": flow.ID, "phase": phase})
 	return action
 }
 
 func (s *Store) Decide(id, action, raw string) bool {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	p := s.pending[id]
+	s.mu.Unlock()
 	if p == nil {
 		return false
 	}
@@ -339,7 +342,7 @@ func (s *Store) LogItems() []LogItem {
 }
 
 func (s *Store) Subscribe() chan any {
-	ch := make(chan any, 64)
+	ch := make(chan any, 256)
 	s.mu.Lock()
 	s.subs[ch] = struct{}{}
 	s.mu.Unlock()

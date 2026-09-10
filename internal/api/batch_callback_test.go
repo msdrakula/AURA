@@ -41,7 +41,7 @@ func TestBatchExecuteEndpoint(t *testing.T) {
 	})
 
 	body := BatchExecuteRequest{
-		TemplateRaw: "GET /test?id=§&name=§ HTTP/1.1\r\nHost: " + target + "\r\nConnection: close\r\n\r\n",
+		TemplateRaw: "GET /test?id=§x§&name=§y§ HTTP/1.1\r\nHost: " + target + "\r\nConnection: close\r\n\r\n",
 		Scheme:      "http",
 		Target:      target,
 		PayloadSets: [][]string{{"a", "b"}, {"1", "2"}},

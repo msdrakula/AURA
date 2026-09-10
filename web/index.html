@@ -3,26 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>MEB — target map</title>
+  <title>AURA — Advanced URL and Request Analyzer</title>
   <script>
     try {
-      var th = localStorage.getItem("meb_theme");
+      var th = localStorage.getItem("aura_theme") || localStorage.getItem("meb_theme");
       if (th === "light" || th === "dark") document.documentElement.setAttribute("data-theme", th);
-      var lg = localStorage.getItem("meb_lang");
+      var lg = localStorage.getItem("aura_lang") || localStorage.getItem("meb_lang");
       if (lg === "ru" || lg === "en") {
         document.documentElement.setAttribute("data-lang", lg);
         document.documentElement.lang = lg;
       }
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/static/app.css?v=25" />
+  <link rel="stylesheet" href="/static/app.css?v=44" />
 </head>
 <body>
 <div id="app">
   <header class="topbar">
     <div class="brand">
-      <span class="logo">MEB</span>
-      <span class="tag" data-i18n="brand.tag">map recon</span>
+      <span class="logo">AURA</span>
+      <span class="tag" data-i18n="brand.tag">Advanced URL and Request Analyzer</span>
     </div>
     <div class="top-actions">
       <div id="langSwitch" class="theme-switch" role="group" data-i18n-aria="lang.aria" aria-label="Language">
@@ -35,30 +35,65 @@
       </div>
       <label class="toggle">
         <input type="checkbox" id="interceptReq" />
-        <span>Intercept</span>
+        <span data-i18n="proxy.intercept">Intercept</span>
       </label>
       <div id="proxyBadge" class="badge off">proxy off</div>
       <div id="pendingBadge" class="badge wait hidden">0 in queue</div>
+      <button type="button" id="btnSettings" class="btn-icon" data-i18n-title="set.title" title="Settings" aria-label="Settings">⚙</button>
     </div>
   </header>
+  <div id="workProgress" class="work-progress hidden" aria-live="polite">
+    <div class="work-progress-track"><div class="work-progress-bar"></div></div>
+    <span id="workProgressText"></span>
+    <button type="button" id="btnWorkStop" class="mini danger" data-i18n="work.stop">Stop</button>
+  </div>
 
   <nav class="tabs" id="mainTabs">
     <button data-view="map" class="active" data-i18n="nav.map">Map</button>
     <button data-view="proxy"><span data-i18n="nav.proxy">Proxy</span><span class="dot hidden" id="proxyDot"></span></button>
     <button data-view="discover" data-i18n="nav.discover">Discover</button>
     <button data-view="fuzz" data-i18n="nav.fuzz">Fuzz</button>
-    <button data-view="intruder">Intruder</button>
-    <button data-view="repeater" data-i18n="nav.repeater">Repeater</button>
+    <button data-view="intruder" data-i18n="nav.intruder">Payloads</button>
+    <button data-view="repeater" data-i18n="nav.repeater">Replay</button>
     <button data-view="target" data-i18n="nav.target">Target</button>
     <button data-view="scanner" data-i18n="nav.scanner">Scanner</button>
     <button data-view="logger" data-i18n="nav.logger">Logger</button>
-    <button data-view="decoder">Decoder</button>
-    <button data-view="comparer">Comparer</button>
-    <button data-view="sequencer">Sequencer</button>
-    <button data-view="collaborator">Collaborator</button>
-    <button data-view="organizer">Organizer</button>
-    <button data-view="extensions">Extensions</button>
+    <button data-view="decoder" data-i18n="nav.decoder">Decoder</button>
+    <button data-view="comparer" data-i18n="nav.comparer">Diff</button>
+    <button data-view="sequencer" data-i18n="nav.sequencer">Tokens</button>
+    <button data-view="collaborator" data-i18n="nav.collaborator">Callback</button>
+    <button data-view="organizer" data-i18n="nav.organizer">Saved</button>
+    <button data-view="extensions" data-i18n="nav.extensions">Extensions</button>
   </nav>
+  <script>
+    (function () {
+      var ru = {
+        map: "Карта", proxy: "Прокси", discover: "Пути", fuzz: "Фаззинг",
+        intruder: "Пакеты", repeater: "Повтор", target: "Цель",
+        scanner: "Сканер", logger: "Лог", decoder: "Декодер",
+        comparer: "Сравнение", sequencer: "Токены",
+        collaborator: "Колбэк", organizer: "Сохранённые", extensions: "Расширения"
+      };
+      var en = {
+        map: "Map", proxy: "Proxy", discover: "Discover", fuzz: "Fuzz",
+        intruder: "Payloads", repeater: "Replay", target: "Target",
+        scanner: "Scanner", logger: "Logger", decoder: "Decoder",
+        comparer: "Diff", sequencer: "Tokens",
+        collaborator: "Callback", organizer: "Saved", extensions: "Extensions"
+      };
+      var lang = "en";
+      try { lang = localStorage.getItem("meb_lang") || "en"; } catch (e) {}
+      var dict = lang === "ru" ? ru : en;
+      document.querySelectorAll("#mainTabs button[data-view]").forEach(function (b) {
+        var t = dict[b.getAttribute("data-view")];
+        if (!t) return;
+        var dot = b.querySelector(".dot");
+        var span = b.querySelector("[data-i18n]");
+        if (span) span.textContent = t;
+        else { b.textContent = t; if (dot) b.appendChild(dot); }
+      });
+    })();
+  </script>
 
   <main>
     <!-- MAP / INTEL -->
@@ -66,22 +101,24 @@
       <div class="map-hero">
         <div>
           <h1 class="map-title" data-i18n="map.title">Target map</h1>
-          <p class="muted" data-i18n="map.lead">One screen: recon steps on the left, application map on the right. Next — Proxy (traffic), Fuzz (paths and FUZZ), Repeater (one HTTP request).</p>
+          <p class="muted" data-i18n="map.lead">Map is recon for one host: Start, then proxy paths appear on the right. Left buttons are extra discovery. Live tree of all proxy traffic is on Target.</p>
         </div>
         <form id="mapForm" class="map-form">
-          <input id="mapTarget" data-i18n-placeholder="map.placeholder" placeholder="app.lab.local or https://app.lab.local/api" autocomplete="off" />
+          <input id="mapTarget" data-i18n-placeholder="map.placeholder" placeholder="https://app.lab.local:8443 or 10.0.0.8:8080" autocomplete="off" />
           <label class="check map-auth"><input type="checkbox" id="mapAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
           <button type="submit" class="primary" id="btnMapStart" data-i18n="map.start">Start</button>
+          <button type="button" id="btnMapClear" data-i18n="map.clear">Clear</button>
         </form>
       </div>
       <div id="mapEmpty" class="map-empty">
-        <p data-i18n="map.empty">Follow the recon checklist: passive facts first, then live hosts, paths, parameters — then the map.</p>
+        <p data-i18n="map.empty">Browsing through the proxy does not fill this tab by itself. Pick the host, click Start — then the tree is built from Proxy history.</p>
         <ol class="steps">
-          <li data-i18n="map.step1">Subdomains from certificates</li>
-          <li data-i18n="map.step2">Live HTTP hosts and web ports</li>
-          <li data-i18n="map.step3">Tech, HTML/JS, old URLs</li>
-          <li data-i18n="map.step4">Hidden paths and parameters</li>
+          <li data-i18n="map.step1">If Intercept is on, press Forward on Proxy — otherwise the request never finishes and is not saved.</li>
+          <li data-i18n="map.step2">Type the host (ya.ru) or click a host from proxy traffic below.</li>
+          <li data-i18n="map.step3">Check “this is my target / lab” and click Start.</li>
+          <li data-i18n="map.step4">Paths from the proxy show on the right. Run buttons on the left are extra recon, not the proxy log.</li>
         </ol>
+        <div id="mapProxyHosts"></div>
       </div>
       <div id="mapWork" class="map-work hidden">
         <div class="map-stats" id="mapStats"></div>
@@ -90,12 +127,30 @@
           <button id="btnMapRefresh" data-i18n="map.refresh">Refresh map</button>
           <span id="mapMeta" class="muted"></span>
         </div>
-        <div class="map-layout">
-          <div class="map-stages" id="mapStages"></div>
-          <div class="map-tree-panel">
+        <div class="map-layout" data-split="map-layout" data-split-dir="h">
+          <div class="split-pane">
+            <div class="map-stages" id="mapStages"></div>
+          </div>
+          <div class="split-pane">
+            <div class="map-tree-panel">
             <h2 data-i18n="map.app">Application</h2>
-            <div class="tree-wrap" id="mapTree"></div>
-            <div id="mapDetail" class="map-detail muted" data-i18n="map.pickNode">Select a node on the map</div>
+            <p class="muted map-app-hint" data-i18n="map.appHint">URL paths on this host from proxy history and recon. Not a file system.</p>
+            <div class="map-app-split" data-split="map-app" data-split-dir="v">
+              <div class="split-pane">
+                <div class="tree-wrap" id="mapTree"></div>
+              </div>
+              <div class="split-pane">
+                <div class="map-activity">
+                  <div class="map-activity-head">
+                    <strong data-i18n="map.activity">Activity</strong>
+                    <button type="button" id="btnMapLogClear" class="mini" data-i18n="map.logClear">Clear</button>
+                  </div>
+                  <pre id="mapLog" class="map-log" aria-live="polite"></pre>
+                  <div id="mapDetail" class="map-detail muted" data-i18n="map.pickNode">Select a node on the map</div>
+                </div>
+              </div>
+            </div>
+            </div>
           </div>
         </div>
       </div>
@@ -141,20 +196,26 @@
           <label class="check"><input type="checkbox" id="siteApplyScope" /> <span data-i18n="target.applyScope">Apply scope</span></label>
           <button id="btnSiteRefresh">Refresh</button>
         </div>
-        <div class="sitemap">
-          <div class="tree-wrap" id="siteTree"></div>
-          <div class="detail">
-            <div class="toolbar">
-              <button id="btnSiteToRepeater" class="mini">→ Repeater</button>
-              <button id="btnSiteToIntruder" class="mini">→ Intruder</button>
-              <button id="btnSiteToScanner" class="mini">→ Scanner</button>
+        <div class="sitemap" data-split="target-sitemap" data-split-dir="h">
+          <div class="split-pane">
+            <div class="tree-wrap" id="siteTree"></div>
+          </div>
+          <div class="split-pane">
+            <div class="detail">
+              <div class="toolbar">
+                <button id="btnSiteToRepeater" class="mini" data-i18n="proxy.toRepeater">→ Replay</button>
+                <button id="btnSiteToIntruder" class="mini" data-i18n="proxy.toIntruder">→ Payloads</button>
+                <button id="btnSiteToScanner" class="mini">→ Scanner</button>
+              </div>
+              <div class="tabs small">
+                <button data-pane="req" class="active">Request</button>
+                <button data-pane="resp">Response</button>
+              </div>
+              <div class="pane-fill">
+                <pre id="siteReq" class="raw-view"></pre>
+                <pre id="siteResp" class="raw-view hidden"></pre>
+              </div>
             </div>
-            <div class="tabs small">
-              <button data-pane="req" class="active">Request</button>
-              <button data-pane="resp">Response</button>
-            </div>
-            <pre id="siteReq" class="raw-view"></pre>
-            <pre id="siteResp" class="raw-view hidden"></pre>
           </div>
         </div>
       </div>
@@ -195,7 +256,7 @@
       </div>
 
       <div data-subpane="issues" class="subpane hidden">
-        <div class="issues-layout">
+        <div class="issues-layout" data-split="issues-layout" data-split-dir="h">
           <div class="issues-list">
             <div class="toolbar"><span class="muted" data-i18n="target.issuesFound">Findings (from analyzer)</span></div>
             <div class="table-wrap" style="max-height:200px">
@@ -226,46 +287,52 @@
     <!-- PROXY (with sub-tabs) -->
     <section id="view-proxy" class="view hidden">
       <nav class="subtabs" id="proxySubtabs">
-        <button data-sub="intercept" class="active">Intercept<span class="dot hidden" id="interceptDot"></span></button>
-        <button data-sub="history">HTTP history</button>
-        <button data-sub="websockets">WebSockets history</button>
-        <button data-sub="matchreplace">Match and replace</button>
-        <button data-sub="settings">Settings</button>
+        <button data-sub="intercept" class="active"><span data-i18n="proxy.sub.intercept">Intercept</span><span class="dot hidden" id="interceptDot"></span></button>
+        <button data-sub="history" data-i18n="proxy.sub.history">HTTP history</button>
+        <button data-sub="websockets" data-i18n="proxy.sub.ws">WebSockets history</button>
+        <button data-sub="matchreplace" data-i18n="proxy.sub.mr">Match and replace</button>
+        <button data-sub="settings" data-i18n="proxy.sub.settings">Settings</button>
       </nav>
 
       <div data-subpane="intercept" class="subpane">
         <div class="toolbar">
           <div class="split-btn">
-            <button id="btnForward" class="primary">Forward</button>
-            <button id="btnForwardAll">Forward all</button>
+            <button id="btnForward" class="primary" data-i18n="proxy.forward">Forward</button>
+            <button id="btnForwardAll" data-i18n="proxy.forwardAll">Forward all</button>
           </div>
           <div class="split-btn">
-            <button id="btnDrop" class="danger">Drop</button>
-            <button id="btnDropAll" class="danger">Drop all</button>
+            <button id="btnDrop" class="danger" data-i18n="proxy.drop">Drop</button>
+            <button id="btnDropAll" class="danger" data-i18n="proxy.dropAll">Drop all</button>
           </div>
           <span id="interceptMeta" class="muted"></span>
         </div>
-        <div class="intercept-list" id="interceptList"></div>
-        <textarea id="interceptEditor" class="raw" spellcheck="false" data-i18n-placeholder="proxy.interceptPh" placeholder="Queue is empty. Turn Intercept on and send traffic through the proxy."></textarea>
+        <div data-split="proxy-intercept" data-split-dir="v">
+          <div class="split-pane">
+            <div class="intercept-list" id="interceptList"></div>
+          </div>
+          <div class="split-pane pane-fill">
+            <textarea id="interceptEditor" class="raw" spellcheck="false" data-i18n-placeholder="proxy.interceptPh" placeholder="Queue is empty. Turn Intercept on and send traffic through the proxy."></textarea>
+          </div>
+        </div>
       </div>
 
       <div data-subpane="history" class="subpane hidden">
         <div class="toolbar">
           <input id="histQ" data-i18n-placeholder="proxy.histFilterPh" placeholder="Filter: host, path, method, status" />
-          <button id="btnHistFilter" data-i18n-title="proxy.advFilter" title="Advanced filter">⚙ Filter</button>
-          <button id="btnReloadHist">Refresh</button>
-          <button id="btnClearHist">Clear</button>
-          <button id="btnToRepeater" class="primary">Send to Repeater</button>
-          <button id="btnToIntruder">Send to Intruder</button>
-          <button id="btnToSequencer">Send to Sequencer</button>
-          <button id="btnToScanner">Send to Scanner</button>
-          <button id="btnToDecoder">Send to Decoder</button>
-          <button id="btnToComparer">Send to Comparer</button>
-          <button id="btnToOrganizer">Send to Organizer</button>
+          <button id="btnHistFilter" data-i18n-title="proxy.advFilter" title="Advanced filter">⚙ <span data-i18n="proxy.filterBtn">Filter</span></button>
+          <button id="btnReloadHist" data-i18n="proxy.refresh">Refresh</button>
+          <button id="btnClearHist" data-i18n="proxy.clear">Clear</button>
+          <button id="btnToRepeater" class="primary" data-i18n="proxy.toRepeater">Send to Replay</button>
+          <button id="btnToIntruder" data-i18n="proxy.toIntruder">Send to Payloads</button>
+          <button id="btnToSequencer" data-i18n="proxy.toSequencer">Send to Tokens</button>
+          <button id="btnToScanner" data-i18n="proxy.toScanner">Send to Scanner</button>
+          <button id="btnToDecoder" data-i18n="proxy.toDecoder">Send to Decoder</button>
+          <button id="btnToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
+          <button id="btnToOrganizer" data-i18n="proxy.toOrganizer">Send to Saved</button>
         </div>
         <div id="histFilterPanel" class="hist-filter hidden">
-          <label class="check"><input type="checkbox" id="hfScope" /> Only in scope</label>
-          <label class="check"><input type="checkbox" id="hfParams" /> Only with params</label>
+          <label class="check"><input type="checkbox" id="hfScope" /> <span data-i18n="proxy.onlyScope">Only in scope</span></label>
+          <label class="check"><input type="checkbox" id="hfParams" /> <span data-i18n="proxy.onlyParams">Only with params</span></label>
           <label>Status <input id="hfStatus" placeholder="200,302" /></label>
           <label>MIME <input id="hfMime" placeholder="html,json" /></label>
           <label>Ext <input id="hfExt" placeholder="php,asp" /></label>
@@ -275,44 +342,50 @@
           <button id="btnHfApply" class="primary">Apply</button>
           <button id="btnHfReset">Reset</button>
         </div>
-        <div class="split">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>#</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th>Len</th><th>ms</th></tr></thead>
-              <tbody id="histBody"></tbody>
-            </table>
-          </div>
-          <div class="detail">
-            <div class="tabs small">
-              <button data-pane="req" class="active">Request</button>
-              <button data-pane="resp">Response</button>
+        <div class="split" data-split="proxy-history" data-split-dir="h">
+          <div class="split-pane">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>#</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th>Len</th><th>ms</th></tr></thead>
+                <tbody id="histBody"></tbody>
+              </table>
             </div>
-            <pre id="histReq" class="raw-view"></pre>
-            <pre id="histResp" class="raw-view hidden"></pre>
+          </div>
+          <div class="split-pane">
+            <div class="detail">
+              <div class="tabs small">
+                <button data-pane="req" class="active">Request</button>
+                <button data-pane="resp">Response</button>
+              </div>
+              <div class="pane-fill">
+                <pre id="histReq" class="raw-view"></pre>
+                <pre id="histResp" class="raw-view hidden"></pre>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       <div data-subpane="websockets" class="subpane hidden">
         <article class="card empty-state">
-          <h2>WebSockets history is empty</h2>
-          <p class="muted" data-i18n="proxy.wsEmpty">WebSocket history between the browser and the target would appear here. WebSocket is a long-lived stream. MEB intercepts HTTP/1.1 only for now.</p>
-          <div class="row"><button id="btnWsOpenBrowser" class="primary">Open browser</button></div>
+          <h2 data-i18n="proxy.wsTitle">WebSockets history is empty</h2>
+          <p class="muted" data-i18n="proxy.wsEmpty">WebSocket history between the browser and the target would appear here. WebSocket is a long-lived stream. AURA intercepts HTTP/1.1 only for now.</p>
+          <div class="row"><button id="btnWsOpenBrowser" class="primary" data-i18n="proxy.openBrowser">Open browser</button></div>
         </article>
       </div>
 
       <div data-subpane="matchreplace" class="subpane hidden">
         <article class="card">
-          <h2>HTTP match and replace</h2>
+          <h2 data-i18n="proxy.mrTitle">HTTP match and replace</h2>
           <p class="muted" data-i18n="proxy.mrHint">Auto replace on request/response. Literal is an exact string, Regex is a regular expression. Applied when you Forward an intercepted request (client-side edit). Auto-apply to all traffic needs a backend hook.</p>
-          <label class="check"><input type="checkbox" id="mrScopeOnly" /> Only apply to in-scope items</label>
+          <label class="check"><input type="checkbox" id="mrScopeOnly" /> <span data-i18n="proxy.mrScope">Only apply to in-scope items</span></label>
         </article>
         <div class="scope-row">
           <div class="scope-actions">
-            <button id="mrAdd" class="primary">Add</button>
-            <button id="mrRemove">Remove</button>
-            <button id="mrUp">Up</button>
-            <button id="mrDown">Down</button>
+            <button id="mrAdd" class="primary" data-i18n="proxy.add">Add</button>
+            <button id="mrRemove" data-i18n="proxy.remove">Remove</button>
+            <button id="mrUp" data-i18n="proxy.up">Up</button>
+            <button id="mrDown" data-i18n="proxy.down">Down</button>
           </div>
           <table class="scope-table">
             <thead><tr><th>Enabled</th><th>Item</th><th>Name</th><th>Match</th><th>Replace</th><th>Type</th><th>Comment</th></tr></thead>
@@ -323,26 +396,9 @@
 
       <div data-subpane="settings" class="subpane hidden">
         <article class="card">
-          <h2>Listener</h2>
-          <p class="muted" data-i18n="proxy.listenerHint">Local HTTP/HTTPS proxy. Traffic goes through you; a CA is needed only for HTTPS.</p>
-          <div class="row">
-            <label>Host <input id="listenHost" value="127.0.0.1" /></label>
-            <label>Port <input id="listenPort" type="number" value="8080" /></label>
-          </div>
-          <div class="row">
-            <button id="btnStart" class="primary">Start</button>
-            <button id="btnStop">Stop</button>
-            <button id="btnLaunchBrowser" class="primary">Open browser</button>
-            <a class="button" href="/api/ca.crt">Download CA</a>
-          </div>
-          <label class="check"><input type="checkbox" id="verifyUp" checked /> <span data-i18n="proxy.verifyUp">Verify upstream certificate</span></label>
-          <label class="check"><input type="checkbox" id="recordHist" checked /> <span data-i18n="proxy.recordHist">Record HTTP history</span></label>
-        </article>
-        <article class="card">
-          <h2>Intercept filter</h2>
-          <p class="muted" data-i18n="proxy.filterHint">Substring in method + URL. Empty means everything.</p>
-          <input id="filter" placeholder="example.com /api" />
-          <label class="check"><input type="checkbox" id="interceptResp" /> <span data-i18n="proxy.interceptResp">Intercept responses too</span></label>
+          <h2 data-i18n="set.proxy">Proxy</h2>
+          <p class="muted" data-i18n="set.proxyMoved">Listener, CA, and intercept filter are in application Settings.</p>
+          <div class="row"><button type="button" id="btnProxyOpenSettings" class="primary" data-i18n="set.open">Open settings</button></div>
         </article>
       </div>
     </section>
@@ -355,23 +411,25 @@
       </div>
       <div id="intrTabContent" class="intr-tab-content">
         <div class="toolbar">
-          <label>Attack type
+          <label class="tb-field">Mode
             <select id="intrAttackType">
-              <option value="sniper">Sniper</option>
-              <option value="battering_ram">Battering ram</option>
-              <option value="pitchfork">Pitchfork</option>
-              <option value="cluster_bomb" selected>Cluster bomb</option>
+              <option value="one" data-i18n="intr.mode.one">One position</option>
+              <option value="same" data-i18n="intr.mode.same">Same value</option>
+              <option value="zip" data-i18n="intr.mode.zip">Paired</option>
+              <option value="combo" selected data-i18n="intr.mode.combo">All combinations</option>
             </select>
           </label>
-          <label>Scheme
+          <label class="tb-field">Scheme
             <select id="intrScheme"><option value="http">http</option><option value="https" selected>https</option></select>
           </label>
-          <label>Target <input id="intrTarget" data-i18n-placeholder="intr.targetPh" placeholder="host:port (optional)" /></label>
-          <label>Workers <input id="intrWorkers" type="number" value="10" /></label>
-          <label>RPS <input id="intrRps" type="number" value="50" /></label>
+          <label class="tb-field tb-grow">Target <input id="intrTarget" data-i18n-placeholder="intr.targetPh" placeholder="host:port (optional)" /></label>
+          <label class="tb-field tb-num">Workers <input id="intrWorkers" type="number" min="1" max="30" value="10" /></label>
+          <label class="tb-field tb-num">RPS <input id="intrRps" type="number" min="1" max="50" value="50" /></label>
           <button id="btnIntrRun" class="primary">Start attack</button>
-          <button id="btnIntrToIntruder">Send to Intruder</button>
+          <button id="btnIntrStop" type="button" disabled data-i18n="work.stop">Stop</button>
+          <button id="btnIntrToIntruder" data-i18n="intr.cloneTab">Clone tab</button>
         </div>
+        <div data-split="intr-main" data-split-dir="v">
         <div class="intr-positions">
           <div class="toolbar">
             <button id="btnIntrAddMark" class="primary">Add §</button>
@@ -379,7 +437,9 @@
             <button id="btnIntrAutoMark">Auto §</button>
             <span id="intrPositionsCount" class="muted">0 payload positions</span>
           </div>
-          <textarea id="intrTemplate" class="raw" spellcheck="false" data-i18n-placeholder="intr.templatePh" placeholder="Paste a request and mark positions with §"></textarea>
+          <div class="pane-fill">
+            <textarea id="intrTemplate" class="raw" spellcheck="false" data-i18n-placeholder="intr.templatePh" placeholder="Paste a request and mark positions with §"></textarea>
+          </div>
         </div>
         <div class="intr-payloads">
           <div class="toolbar"><span class="muted">Payload sets</span> <button id="btnAddPayloadSet">+ Add payload set</button></div>
@@ -390,6 +450,7 @@
             <thead><tr><th>#</th><th>Payloads</th><th>Status</th><th>Body len</th><th>ms</th><th>Error</th></tr></thead>
             <tbody id="intrBody"></tbody>
           </table>
+        </div>
         </div>
       </div>
     </section>
@@ -408,21 +469,28 @@
           </select>
           <input id="repTarget" data-i18n-placeholder="rep.targetPh" placeholder="host:port (optional, taken from Host)" />
           <button id="btnSend" class="primary">Send</button>
-          <button id="btnRepToIntruder">Send to Intruder</button>
-          <button id="btnRepToScanner">Send to Scanner</button>
-          <button id="btnRepToComparer">Send to Comparer</button>
-          <button id="btnRepToOrganizer">Send to Organizer</button>
+          <button id="btnRepStop" type="button" disabled data-i18n="work.stop">Stop</button>
+          <button id="btnRepToIntruder" data-i18n="proxy.toIntruder">Send to Payloads</button>
+          <button id="btnRepToScanner" data-i18n="proxy.toScanner">Send to Scanner</button>
+          <button id="btnRepToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
+          <button id="btnRepToOrganizer" data-i18n="proxy.toOrganizer">Send to Saved</button>
           <span id="repMeta" class="muted"></span>
         </div>
-        <div class="rep-layout">
-          <textarea id="repReq" class="raw" spellcheck="false">GET / HTTP/1.1
+        <div class="rep-layout" data-split="rep-layout" data-split-dir="h">
+          <div class="split-pane pane-fill">
+            <textarea id="repReq" class="raw" spellcheck="false">GET / HTTP/1.1
 Host: example.com
-User-Agent: MEB/0.1
+User-Agent: AURA/0.1
 Accept: */*
 
 </textarea>
-          <pre id="repResp" class="raw-view"></pre>
-          <aside id="repInspector" class="inspector"><p class="muted" data-i18n="rep.inspector">Inspector: parsed request will appear here.</p></aside>
+          </div>
+          <div class="split-pane pane-fill">
+            <pre id="repResp" class="raw-view"></pre>
+          </div>
+          <div class="split-pane">
+            <aside id="repInspector" class="inspector"><p class="muted" data-i18n="rep.inspector">Inspector: parsed request will appear here.</p></aside>
+          </div>
         </div>
       </div>
     </section>
@@ -430,7 +498,7 @@ Accept: */*
     <!-- COLLABORATOR -->
     <section id="view-collaborator" class="view hidden">
       <article class="card">
-        <h2>Collaborator (callback receiver)</h2>
+        <h2 data-i18n="collab.title">Callback log</h2>
         <p class="muted"><span data-i18n="collab.hintBefore">Send HTTP requests to</span> <code id="callbackUrl">http://127.0.0.1:8082/&lt;request-id&gt;/...</code> <span data-i18n="collab.hintAfter">— they are logged here. ID is the first path segment.</span></p>
         <div class="toolbar">
           <input id="callbackId" data-i18n-placeholder="collab.idPh" placeholder="request ID (e.g. my-session-123)" />
@@ -443,28 +511,35 @@ Accept: */*
 
     <!-- SEQUENCER -->
     <section id="view-sequencer" class="view hidden">
-      <div class="seq-layout">
-        <div class="seq-input">
-          <h2>Sequencer — Manual load</h2>
+      <div class="seq-layout" data-split="seq-layout" data-split-dir="h">
+        <div class="split-pane seq-input">
+          <h2 data-i18n="seq.title">Token randomness</h2>
           <p class="muted" data-i18n="seq.hint">Paste tokens (one per line). Minimum 100, 5000 recommended, 20000 max.</p>
-          <textarea id="seqTokens" class="raw" spellcheck="false" placeholder="token1\ntoken2\ntoken3..."></textarea>
+          <div class="pane-fill">
+            <textarea id="seqTokens" class="raw" spellcheck="false" placeholder="token1\ntoken2\ntoken3..."></textarea>
+          </div>
           <div class="toolbar">
             <button id="btnSeqAnalyze" class="primary">Analyze now</button>
             <button id="btnSeqClear">Clear</button>
             <span id="seqCount" class="muted"></span>
           </div>
         </div>
-        <div class="seq-results" id="seqResults">
-          <p class="muted" data-i18n="seq.results">Analysis results will appear here.</p>
+        <div class="split-pane">
+          <div class="seq-results" id="seqResults">
+            <p class="muted" data-i18n="seq.results">Analysis results will appear here.</p>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- DECODER -->
     <section id="view-decoder" class="view hidden">
-      <div class="codec-grid">
-        <textarea id="codecIn" class="raw" spellcheck="false" data-i18n-placeholder="codec.in" placeholder="Input"></textarea>
-        <div class="codec-btns">
+      <div class="codec-grid" data-split="codec-grid" data-split-dir="h">
+        <div class="split-pane pane-fill">
+          <textarea id="codecIn" class="raw" spellcheck="false" data-i18n-placeholder="codec.in" placeholder="Input"></textarea>
+        </div>
+        <div class="split-pane">
+          <div class="codec-btns">
           <button data-act="url_encode">URL enc</button>
           <button data-act="url_decode">URL dec</button>
           <button data-act="url_encode_plus">URL+ enc</button>
@@ -491,8 +566,11 @@ Accept: */*
           <button data-act="hash_sha256">SHA256</button>
           <button data-act="hash_sha512">SHA512</button>
           <button id="codecSwap">Swap ⇄</button>
+          </div>
         </div>
-        <textarea id="codecOut" class="raw" spellcheck="false" data-i18n-placeholder="codec.out" placeholder="Output"></textarea>
+        <div class="split-pane pane-fill">
+          <textarea id="codecOut" class="raw" spellcheck="false" data-i18n-placeholder="codec.out" placeholder="Output"></textarea>
+        </div>
       </div>
       <p id="codecErr" class="error"></p>
     </section>
@@ -504,11 +582,21 @@ Accept: */*
         <label class="check"><input type="checkbox" id="cmpIgnoreWs" /> Ignore whitespace</label>
         <span id="cmpMeta" class="muted"></span>
       </div>
-      <div class="grid-2 comparer-grid">
-        <textarea id="cmpA" class="raw" spellcheck="false" data-i18n-placeholder="cmp.left" placeholder="Left side (paste from Repeater/History)"></textarea>
-        <textarea id="cmpB" class="raw" spellcheck="false" data-i18n-placeholder="cmp.right" placeholder="Right side"></textarea>
+      <div data-split="comparer-main" data-split-dir="v">
+        <div class="split-pane">
+          <div class="grid-2 comparer-grid" data-split="comparer-grid" data-split-dir="h">
+            <div class="split-pane pane-fill">
+              <textarea id="cmpA" class="raw" spellcheck="false" data-i18n-placeholder="cmp.left" placeholder="Left side (paste from Replay or History)"></textarea>
+            </div>
+            <div class="split-pane pane-fill">
+              <textarea id="cmpB" class="raw" spellcheck="false" data-i18n-placeholder="cmp.right" placeholder="Right side"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="split-pane pane-fill">
+          <pre id="cmpDiff" class="raw-view diff-view"></pre>
+        </div>
       </div>
-      <pre id="cmpDiff" class="raw-view diff-view"></pre>
     </section>
 
     <!-- LOGGER -->
@@ -528,61 +616,83 @@ Accept: */*
         <button id="btnLogRefresh">Refresh</button>
         <span id="logMeta" class="muted"></span>
       </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>#</th><th>Source</th><th>Time</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th>Len</th><th>ms</th></tr></thead>
-          <tbody id="logFlows"></tbody>
-        </table>
-      </div>
-      <div class="detail">
-        <div class="tabs small">
-          <button data-pane="req" class="active">Request</button>
-          <button data-pane="resp">Response</button>
+      <div data-split="logger-main" data-split-dir="v">
+        <div class="split-pane">
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>#</th><th>Source</th><th>Time</th><th>Method</th><th>Host</th><th>Path</th><th>Status</th><th>Len</th><th>ms</th></tr></thead>
+              <tbody id="logFlows"></tbody>
+            </table>
+          </div>
         </div>
-        <pre id="logReq" class="raw-view"></pre>
-        <pre id="logResp" class="raw-view hidden"></pre>
+        <div class="split-pane">
+          <div class="detail">
+            <div class="tabs small">
+              <button data-pane="req" class="active">Request</button>
+              <button data-pane="resp">Response</button>
+            </div>
+            <div class="pane-fill">
+              <pre id="logReq" class="raw-view"></pre>
+              <pre id="logResp" class="raw-view hidden"></pre>
+            </div>
+          </div>
+        </div>
       </div>
     </section>
 
     <!-- ORGANIZER -->
     <section id="view-organizer" class="view hidden">
-      <div class="org-layout">
-        <div class="org-collections">
-          <h2>Organizer</h2>
-          <p class="muted" data-i18n="org.hint">Saved request collections.</p>
-          <div id="orgCollections" class="org-coll-list"></div>
-          <div class="toolbar">
-            <input id="orgNewColl" data-i18n-placeholder="org.newPh" placeholder="new collection" />
-            <button id="btnOrgAddColl">+ Add</button>
+      <div class="org-layout" data-split="org-layout" data-split-dir="h">
+        <div class="split-pane">
+          <div class="org-collections">
+            <h2 data-i18n="org.title">Saved requests</h2>
+            <p class="muted" data-i18n="org.hint">Saved request collections.</p>
+            <div id="orgCollections" class="org-coll-list"></div>
+            <div class="toolbar">
+              <input id="orgNewColl" data-i18n-placeholder="org.newPh" placeholder="new collection" />
+              <button id="btnOrgAddColl">+ Add</button>
+            </div>
           </div>
         </div>
-        <div class="org-main">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>#</th><th>Time</th><th>Status</th><th>Method</th><th>Host</th><th>Path</th><th>Code</th><th>Len</th><th>Notes</th></tr></thead>
-              <tbody id="orgBody"></tbody>
-            </table>
-          </div>
-          <div class="org-detail">
-            <div class="toolbar">
-              <select id="orgStatus">
-                <option value="">— status —</option>
-                <option value="todo">To do</option>
-                <option value="in_progress">In progress</option>
-                <option value="done">Done</option>
-                <option value="ignored">Ignored</option>
-              </select>
-              <input id="orgHighlight" placeholder="highlight color (e.g. red)" />
-              <select id="orgMoveColl"></select>
-              <button id="btnOrgSave">Save</button>
-              <button id="btnOrgDelete" class="danger">Delete</button>
-              <button id="btnOrgToRepeater">Send to Repeater</button>
-              <button id="btnOrgToComparer">Send to Comparer</button>
-            </div>
-            <textarea id="orgNotes" data-i18n-placeholder="org.notesPh" placeholder="Notes…"></textarea>
-            <div class="split">
-              <textarea id="orgReq" class="raw" spellcheck="false" readonly></textarea>
-              <pre id="orgResp" class="raw" readonly></pre>
+        <div class="split-pane">
+          <div class="org-main">
+            <div data-split="org-main" data-split-dir="v">
+              <div class="split-pane">
+                <div class="table-wrap">
+                  <table>
+                    <thead><tr><th>#</th><th>Time</th><th>Status</th><th>Method</th><th>Host</th><th>Path</th><th>Code</th><th>Len</th><th>Notes</th></tr></thead>
+                    <tbody id="orgBody"></tbody>
+                  </table>
+                </div>
+              </div>
+              <div class="split-pane">
+                <div class="org-detail">
+                  <div class="toolbar">
+                    <select id="orgStatus">
+                      <option value="">— status —</option>
+                      <option value="todo">To do</option>
+                      <option value="in_progress">In progress</option>
+                      <option value="done">Done</option>
+                      <option value="ignored">Ignored</option>
+                    </select>
+                    <input id="orgHighlight" placeholder="highlight color (e.g. red)" />
+                    <select id="orgMoveColl"></select>
+                    <button id="btnOrgSave">Save</button>
+                    <button id="btnOrgDelete" class="danger">Delete</button>
+                    <button id="btnOrgToRepeater" data-i18n="proxy.toRepeater">Send to Replay</button>
+                    <button id="btnOrgToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
+                  </div>
+                  <textarea id="orgNotes" data-i18n-placeholder="org.notesPh" placeholder="Notes…"></textarea>
+                  <div class="split" data-split="org-detail" data-split-dir="h">
+                    <div class="split-pane pane-fill">
+                      <textarea id="orgReq" class="raw" spellcheck="false" readonly></textarea>
+                    </div>
+                    <div class="split-pane pane-fill">
+                      <pre id="orgResp" class="raw" readonly></pre>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -593,7 +703,7 @@ Accept: */*
     <section id="view-extensions" class="view hidden">
       <article class="card">
         <h2>Extensions</h2>
-        <p class="muted" data-i18n="ext.hint">Add-on modules (BApp-style). Load a .js extension to add custom checks, context actions, or traffic handling.</p>
+        <p class="muted" data-i18n="ext.hint">Add-on modules. Load a .js extension to add custom checks, context actions, or traffic handling.</p>
         <div class="toolbar">
           <input id="extPath" data-i18n-placeholder="ext.pathPh" placeholder="path to .js extension file" />
           <button id="btnExtLoad" class="primary">Load</button>
@@ -605,13 +715,13 @@ Accept: */*
             <tbody id="extBody"><tr><td colspan="5" class="muted" data-i18n="ext.empty">no extensions loaded</td></tr></tbody>
           </table>
         </div>
-        <p class="muted" data-i18n="ext.api">In this version extensions run in an isolated browser context and can use: meb.onFlow(cb), meb.sendRaw(raw, opts), meb.log(msg). A simplified BApp Store alternative.</p>
+        <p class="muted" data-i18n="ext.api">In this version extensions run in an isolated browser context and can use: aura.onFlow(cb), aura.sendRaw(raw, opts), aura.log(msg).</p>
       </article>
     </section>
 
     <!-- DISCOVER -->
     <section id="view-discover" class="view hidden">
-      <div class="disc-layout">
+      <div class="disc-layout" data-split="disc-layout" data-split-dir="h">
         <div class="disc-form">
           <h2 data-i18n="disc.title">Paths</h2>
           <p class="muted" data-i18n="disc.hint">Directory brute-force. Pick any SecLists dictionary (MIT) or paste your own list.</p>
@@ -624,9 +734,11 @@ Accept: */*
           <p class="muted" id="discWlMeta"></p>
           <label><span data-i18n="disc.orCustom">Or your own list</span> <textarea id="discWords" class="raw" data-i18n-placeholder="disc.customPh" placeholder="if filled, used instead of SecLists"></textarea></label>
           <button id="btnDiscBuiltin" data-i18n="disc.short">Short built-in</button>
-          <button id="btnDiscRun" class="primary">Start discovery</button>
-          <button id="btnDiscStop">Stop</button>
-          <span id="discMeta" class="muted"></span>
+          <div class="job-actions">
+            <button id="btnDiscRun" class="primary">Start discovery</button>
+            <button id="btnDiscStop" type="button" disabled data-i18n="work.stop">Stop</button>
+            <span id="discMeta" class="muted"></span>
+          </div>
         </div>
         <div class="disc-results">
           <div class="toolbar">
@@ -646,7 +758,7 @@ Accept: */*
 
     <!-- FUZZ -->
     <section id="view-fuzz" class="view hidden">
-      <div class="disc-layout">
+      <div class="disc-layout" data-split="fuzz-layout" data-split-dir="h">
         <div class="disc-form">
           <h2 data-i18n="fuzz.title">Fuzz — generic brute-force</h2>
           <p class="muted" data-i18n-html="fuzz.hint">Like ffuf: put <code>FUZZ</code> in the URL. Wordlist entries replace it. Lab / own target only.</p>
@@ -666,8 +778,11 @@ Accept: */*
             <button id="btnFuzzDirs" data-i18n="fuzz.shortPaths">Short: paths</button>
             <button id="btnFuzzParams" data-i18n="fuzz.shortParams">Short: params</button>
           </div>
-          <button id="btnFuzzRun" class="primary">Start fuzz</button>
-          <span id="fuzzMeta" class="muted"></span>
+          <div class="job-actions">
+            <button id="btnFuzzRun" class="primary">Start fuzz</button>
+            <button id="btnFuzzStop" type="button" disabled data-i18n="work.stop">Stop</button>
+            <span id="fuzzMeta" class="muted"></span>
+          </div>
         </div>
         <div class="disc-results">
           <div class="table-wrap">
@@ -682,18 +797,23 @@ Accept: */*
 
     <!-- SCANNER -->
     <section id="view-scanner" class="view hidden">
-      <div class="scan-layout">
+      <div class="scan-layout" data-split="scan-layout" data-split-dir="h">
         <div class="scan-form">
           <h2>Scanner — active scan</h2>
           <p class="muted" data-i18n="scan.hint">Active checks on a request (SQLi, XSS, path traversal, command injection, open redirect, CORS, headers, cookies).</p>
           <label class="check"><input type="checkbox" id="scanFromHistory" /> <span data-i18n="scan.fromHist">Take from selected flow (Proxy history)</span></label>
-          <label>Scheme
-            <select id="scanScheme"><option value="https" selected>https</option><option value="http">http</option></select>
-          </label>
-          <label>Target <input id="scanTarget" data-i18n-placeholder="intr.targetPh" placeholder="host:port (optional)" /></label>
+          <div class="toolbar">
+            <label class="tb-field">Scheme
+              <select id="scanScheme"><option value="https" selected>https</option><option value="http">http</option></select>
+            </label>
+            <label class="tb-field tb-grow">Target <input id="scanTarget" data-i18n-placeholder="intr.targetPh" placeholder="host:port (optional)" /></label>
+          </div>
           <textarea id="scanRaw" class="raw" spellcheck="false" data-i18n-placeholder="scan.rawPh" placeholder="Paste a request to scan"></textarea>
-          <button id="btnScanRun" class="primary">Start scan</button>
-          <span id="scanMeta" class="muted"></span>
+          <div class="job-actions">
+            <button id="btnScanRun" class="primary">Start scan</button>
+            <button id="btnScanStop" type="button" disabled data-i18n="work.stop">Stop</button>
+            <span id="scanMeta" class="muted"></span>
+          </div>
         </div>
         <div class="scan-results">
           <div class="table-wrap">
@@ -706,8 +826,97 @@ Accept: */*
       </div>
     </section>
   </main>
+
+  <div id="settingsOverlay" class="settings-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="settings-modal">
+      <div class="settings-head">
+        <h2 id="settingsTitle" data-i18n="set.title">Settings</h2>
+        <button type="button" id="btnSettingsClose" class="btn-icon" data-i18n-title="set.close" title="Close">×</button>
+      </div>
+      <nav class="settings-nav" id="settingsNav">
+        <button type="button" data-settab="look" class="active" data-i18n="set.look">Appearance</button>
+        <button type="button" data-settab="layout" data-i18n="set.layout">Layout</button>
+        <button type="button" data-settab="proxy" data-i18n="set.proxy">Proxy</button>
+      </nav>
+      <div class="settings-body">
+        <div class="settings-pane" data-setpane="look">
+          <article class="card">
+            <h2 data-i18n="set.look">Appearance</h2>
+            <div class="settings-row">
+              <span data-i18n="set.theme">Theme</span>
+              <div id="setThemeSwitch" class="theme-switch" role="group">
+                <button type="button" data-theme="dark" data-i18n="theme.dark">Dark</button>
+                <button type="button" data-theme="light" data-i18n="theme.light">Light</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <span data-i18n="set.lang">Language</span>
+              <div id="setLangSwitch" class="theme-switch" role="group">
+                <button type="button" data-lang="en">EN</button>
+                <button type="button" data-lang="ru">RU</button>
+              </div>
+            </div>
+            <div class="settings-row">
+              <label class="grow"><span data-i18n="set.uiScale">Interface size</span>
+                <input id="setUiScale" type="range" min="85" max="130" step="5" value="100" />
+              </label>
+              <span id="setUiScaleVal">100%</span>
+            </div>
+            <div class="settings-row">
+              <label class="grow"><span data-i18n="set.editorScale">Request editor size</span>
+                <input id="setEditorScale" type="range" min="85" max="140" step="5" value="100" />
+              </label>
+              <span id="setEditorScaleVal">100%</span>
+            </div>
+            <label class="check"><input type="checkbox" id="setShowTag" checked /> <span data-i18n="set.showTag">Show product subtitle in the header</span></label>
+          </article>
+          <article class="card">
+            <p class="muted" data-i18n="set.resetVisualHint">Restores theme, sizes, and pane layout. Proxy host/port and intercept options stay as they are.</p>
+            <div class="settings-actions">
+              <button type="button" id="btnResetVisual" class="danger" data-i18n="set.resetVisual">Reset appearance and pane sizes</button>
+              <span id="setVisualMsg" class="muted"></span>
+            </div>
+          </article>
+        </div>
+        <div class="settings-pane hidden" data-setpane="layout">
+          <article class="card">
+            <h2 data-i18n="set.layout">Layout</h2>
+            <p class="muted" data-i18n="set.layoutHint">Drag the separators between panes. Sizes are saved in this browser. Double-click a separator to reset that pair.</p>
+            <div class="settings-actions">
+              <button type="button" id="btnResetLayout" class="primary" data-i18n="set.resetLayout">Reset pane sizes</button>
+              <span id="setLayoutMsg" class="muted"></span>
+            </div>
+          </article>
+        </div>
+        <div class="settings-pane hidden" data-setpane="proxy">
+          <article class="card">
+            <h2 data-i18n="proxy.listener">Listener</h2>
+            <p class="muted" data-i18n="proxy.listenerHint">Local HTTP/HTTPS proxy. Traffic goes through you; a CA is needed only for HTTPS.</p>
+            <div class="row">
+              <label><span data-i18n="proxy.host">Host</span> <input id="listenHost" value="127.0.0.1" /></label>
+              <label><span data-i18n="proxy.port">Port</span> <input id="listenPort" type="number" value="8080" /></label>
+            </div>
+            <div class="row">
+              <button id="btnStart" class="primary" data-i18n="proxy.start">Start</button>
+              <button id="btnStop" data-i18n="proxy.stop">Stop</button>
+              <button id="btnLaunchBrowser" class="primary" data-i18n="proxy.openBrowser">Open browser</button>
+              <a class="button" href="/api/ca.crt" data-i18n="proxy.downloadCA">Download CA</a>
+            </div>
+            <label class="check"><input type="checkbox" id="verifyUp" checked /> <span data-i18n="proxy.verifyUp">Verify upstream certificate</span></label>
+            <label class="check"><input type="checkbox" id="recordHist" checked /> <span data-i18n="proxy.recordHist">Record HTTP history</span></label>
+          </article>
+          <article class="card">
+            <h2 data-i18n="proxy.filterTitle">Intercept filter</h2>
+            <p class="muted" data-i18n="proxy.filterHint">Substring in method + URL. Empty means everything.</p>
+            <input id="filter" placeholder="example.com /api" />
+            <label class="check"><input type="checkbox" id="interceptResp" /> <span data-i18n="proxy.interceptResp">Intercept responses too</span></label>
+          </article>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
-<script src="/static/i18n.js?v=23"></script>
-<script src="/static/app.js?v=23"></script>
+<script src="/static/i18n.js?v=44"></script>
+<script src="/static/app.js?v=44"></script>
 </body>
 </html>

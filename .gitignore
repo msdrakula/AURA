@@ -1,7 +1,11 @@
 /meb
+/aura
 *.db
 *.db-wal
 *.db-shm
 /data/ca/
 /data/leaf/
+/data/debug/*.jsonl
+/data/debug/CURRENT
+/data/debug/latest.path
 /third_party/SecLists/

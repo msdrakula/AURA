@@ -33,6 +33,8 @@ type BatchExecuteRequest struct {
 	Target      string     `json:"target"`
 	AttackType  string     `json:"attack_type"`
 	PayloadSets [][]string `json:"payload_sets"`
+	Workers     int        `json:"workers"`
+	RPS         int        `json:"rps"`
 }
 
 func (s *Server) batchExecute(w http.ResponseWriter, r *http.Request) {
@@ -55,21 +57,35 @@ func (s *Server) batchExecute(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.AttackType == "" {
-		body.AttackType = "cluster_bomb"
+		body.AttackType = "combo"
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
 	defer cancel()
 
+	workers, rps := body.Workers, body.RPS
+	if workers < 1 {
+		workers = 10
+	}
+	if rps < 1 {
+		rps = 50
+	}
+	if workers > 30 {
+		workers = 30
+	}
+	if rps > 50 {
+		rps = 50
+	}
+
 	// Use a fresh engine with logging if a factory is available, else the shared one.
 	runner := s.Batch
 	if s.BatchFactory != nil {
-		runner = s.BatchFactory(10, 50, func(reqRaw, respRaw string) {
+		runner = s.BatchFactory(workers, rps, func(reqRaw, respRaw string) {
 			s.saveToolFlow(reqRaw, respRaw, body.Scheme, "intruder")
 		})
 	}
 	results, err := runner.ExecuteAttack(ctx, body.TemplateRaw, body.Scheme, body.Target, body.AttackType, body.PayloadSets)
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		s.Log.Warn("batch: execute", zap.Error(err))
 		writeErr(w, 400, err.Error())
 		return

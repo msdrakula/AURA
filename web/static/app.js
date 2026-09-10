@@ -1,34 +1,481 @@
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => [...document.querySelectorAll(sel)];
 
-function applyLang(name) {
-  setLang(name);
-  applyI18nDom();
-  $$("#langSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.lang === mebLang));
-  refreshTranslatedUI();
+const DebugLog = (() => {
+  const q = [];
+  let timer = null;
+  let flushing = false;
+  function enqueue(ev) {
+    q.push({
+      ts: new Date().toISOString(),
+      src: "ui",
+      level: ev.level || "info",
+      module: ev.module || "ui",
+      action: ev.action || "",
+      msg: ev.msg || "",
+      err: ev.err || "",
+      fields: ev.fields || undefined,
+    });
+    if (q.length > 300) q.splice(0, q.length - 300);
+    if (!timer) timer = setTimeout(flush, 800);
+  }
+  function flush() {
+    timer = null;
+    if (!q.length || flushing) return;
+    const batch = q.splice(0, 80);
+    flushing = true;
+    fetch("/api/debug-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ events: batch }),
+    }).catch(() => {}).finally(() => { flushing = false; });
+  }
+  window.addEventListener("error", (e) => {
+    enqueue({
+      level: "error",
+      module: "js",
+      action: "uncaught",
+      msg: e.message || "error",
+      err: e.error && e.error.stack ? String(e.error.stack) : "",
+      fields: { file: e.filename, line: e.lineno, col: e.colno },
+    });
+  });
+  window.addEventListener("unhandledrejection", (e) => {
+    const reason = e.reason;
+    enqueue({
+      level: "error",
+      module: "js",
+      action: "unhandledrejection",
+      msg: reason && reason.message ? reason.message : String(reason),
+      err: reason && reason.stack ? String(reason.stack) : "",
+    });
+  });
+  enqueue({ level: "info", module: "ui", action: "boot", msg: "ui loaded", fields: { href: location.href, lang: document.documentElement.getAttribute("data-lang") } });
+  return { log: enqueue, flush };
+})();
+
+function isAbortError(err) {
+  return !!(err && (err.name === "AbortError" || /aborted|abort/i.test(String(err.message || ""))));
 }
+
+function setWork(msg) {
+  const bar = $("#workProgress");
+  const tx = $("#workProgressText");
+  if (!bar) return;
+  if (!msg) {
+    bar.classList.add("hidden");
+    if (tx) tx.textContent = "";
+    return;
+  }
+  bar.classList.remove("hidden");
+  if (tx) tx.textContent = msg;
+}
+
+function markBusy(btn, on, label) {
+  if (!btn) return;
+  if (on) {
+    if (!btn.dataset.label) btn.dataset.label = btn.textContent.trim();
+    btn.disabled = true;
+    btn.classList.add("is-busy");
+    btn.innerHTML = `<span class="spin" aria-hidden="true"></span>${label || tr("work.running")}`;
+    return;
+  }
+  btn.disabled = false;
+  btn.classList.remove("is-busy");
+  btn.textContent = btn.dataset.label || label || btn.textContent;
+  delete btn.dataset.label;
+}
+
+const Jobs = {
+  ctrls: new Map(),
+  labels: new Map(),
+  start(id, label) {
+    this.stop(id);
+    const c = new AbortController();
+    this.ctrls.set(id, c);
+    if (label) this.labels.set(id, label);
+    this.syncBar();
+    return c.signal;
+  },
+  stop(id) {
+    const c = this.ctrls.get(id);
+    if (!c) return false;
+    c.abort();
+    this.ctrls.delete(id);
+    this.labels.delete(id);
+    this.syncBar();
+    return true;
+  },
+  stopAll() {
+    for (const id of [...this.ctrls.keys()]) this.stop(id);
+  },
+  finish(id) {
+    this.ctrls.delete(id);
+    this.labels.delete(id);
+    this.syncBar();
+  },
+  running(id) { return this.ctrls.has(id); },
+  prefix(p) { return [...this.ctrls.keys()].filter((k) => k.startsWith(p)); },
+  syncBar() {
+    const labels = [...this.labels.values()];
+    if (!labels.length) { setWork(""); return; }
+    const last = (typeof MapLog !== "undefined" && MapLog.latest()) || "";
+    const mapN = this.prefix("map:").length;
+    if (last && mapN && mapN === labels.length) { setWork(last); return; }
+    if (labels.length === 1) { setWork(labels[0]); return; }
+    if (mapN && mapN === labels.length) { setWork(tr("map.nRunning", { n: mapN })); return; }
+    setWork(tr("work.nJobs", { n: labels.length }));
+  },
+};
+
+async function withWork(msg, btn, fn) {
+  setWork(msg);
+  if (btn) markBusy(btn, true, msg);
+  try { return await fn(); }
+  finally {
+    if (btn) markBusy(btn, false);
+    Jobs.syncBar();
+  }
+}
+
+async function runJob(id, { label, runBtn, stopBtn, meta, fn }) {
+  if (Jobs.running(id)) return { aborted: true };
+  const signal = Jobs.start(id, label);
+  if (stopBtn) stopBtn.disabled = false;
+  if (runBtn) markBusy(runBtn, true, label);
+  if (meta) meta.textContent = label;
+  try {
+    return await fn(signal);
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (meta) meta.textContent = tr("work.stopped");
+      return { aborted: true };
+    }
+    throw err;
+  } finally {
+    Jobs.finish(id);
+    if (runBtn) markBusy(runBtn, false);
+    if (stopBtn) stopBtn.disabled = true;
+  }
+}
+
+function bindJobStop(btn, id) {
+  btn?.addEventListener("click", () => Jobs.stop(id));
+}
+$("#btnWorkStop")?.addEventListener("click", () => Jobs.stopAll());
+bindJobStop($("#btnDiscStop"), "discover");
+bindJobStop($("#btnFuzzStop"), "fuzz");
+bindJobStop($("#btnScanStop"), "scanner");
+bindJobStop($("#btnIntrStop"), "intruder");
+bindJobStop($("#btnRepStop"), "repeater");
 
 function applyTheme(name) {
   const t = name === "light" ? "light" : "dark";
   document.documentElement.setAttribute("data-theme", t);
-  try { localStorage.setItem("meb_theme", t); } catch (_) {}
-  $$("#themeSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.theme === t));
+  try { localStorage.setItem("aura_theme", t); } catch (_) {}
+  $$("#themeSwitch button, #setThemeSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.theme === t));
+  if (UILayout && UILayout.data) {
+    UILayout.data.theme = t;
+    UILayout.save();
+  }
+}
+
+const UILayout = {
+  key: "aura_ui_v3",
+  defaults: {
+    theme: "dark",
+    uiScale: 100,
+    editorScale: 100,
+    showTag: true,
+    lastView: "map",
+    lastProxySub: "intercept",
+    splits: {
+      "proxy-intercept": [22, 78],
+      "proxy-history": [46, 54],
+      "map-layout": [38, 62],
+      "map-app": [58, 42],
+      "target-sitemap": [34, 66],
+      "rep-layout": [38, 38, 24],
+      "codec-grid": [42, 16, 42],
+      "comparer-main": [58, 42],
+      "comparer-grid": [50, 50],
+      "seq-layout": [46, 54],
+      "disc-layout": [34, 66],
+      "fuzz-layout": [34, 66],
+      "scan-layout": [36, 64],
+      "org-layout": [22, 78],
+      "org-main": [36, 64],
+      "org-detail": [50, 50],
+      "logger-main": [48, 52],
+      "intr-main": [42, 22, 36],
+      "issues-layout": [48, 52],
+    },
+  },
+  data: null,
+  load() {
+    let saved = {};
+    try { saved = JSON.parse(localStorage.getItem(this.key) || "{}"); } catch (_) { saved = {}; }
+    if (!saved.theme) {
+      try { saved.theme = localStorage.getItem("aura_theme") || localStorage.getItem("meb_theme") || "dark"; } catch (_) { saved.theme = "dark"; }
+    }
+    this.data = {
+      ...this.defaults,
+      ...saved,
+      splits: { ...this.defaults.splits, ...(saved.splits || {}) },
+    };
+  },
+  save() {
+    try { localStorage.setItem(this.key, JSON.stringify(this.data)); } catch (_) {}
+  },
+  applyChrome() {
+    const ui = Number(this.data.uiScale) || 100;
+    const ed = Number(this.data.editorScale) || 100;
+    document.documentElement.style.setProperty("--ui-scale", String(ui / 100));
+    document.documentElement.style.setProperty("--editor-scale", String(ed / 100));
+    document.documentElement.setAttribute("data-hide-tag", this.data.showTag === false ? "1" : "0");
+    const uiEl = $("#setUiScale"), edEl = $("#setEditorScale"), tagEl = $("#setShowTag");
+    if (uiEl) uiEl.value = String(ui);
+    if (edEl) edEl.value = String(ed);
+    if (tagEl) tagEl.checked = this.data.showTag !== false;
+    if ($("#setUiScaleVal")) $("#setUiScaleVal").textContent = ui + "%";
+    if ($("#setEditorScaleVal")) $("#setEditorScaleVal").textContent = ed + "%";
+  },
+  panes(el) {
+    return [...el.children].filter((c) => !c.classList.contains("gutter"));
+  },
+  applySplit(el) {
+    const id = el.dataset.split;
+    const dir = el.dataset.splitDir === "v" ? "v" : "h";
+    const sizes = this.data.splits[id] || this.defaults.splits[id];
+    const panes = this.panes(el);
+    if (!panes.length) return;
+    const tracks = [];
+    panes.forEach((p, i) => {
+      const n = Math.max(Number(sizes && sizes[i] != null ? sizes[i] : (100 / panes.length)), 8);
+      tracks.push(`minmax(88px, ${n}fr)`);
+      if (i < panes.length - 1) tracks.push("10px");
+      p.style.flex = "";
+      p.style.minWidth = "0";
+      p.style.minHeight = "0";
+      p.style.overflow = "hidden";
+    });
+    el.style.display = "grid";
+    el.style.flex = "1 1 auto";
+    el.style.minHeight = "0";
+    el.style.minWidth = "0";
+    if (dir === "v") {
+      el.style.gridTemplateRows = tracks.join(" ");
+      el.style.gridTemplateColumns = "minmax(0, 1fr)";
+      el.style.flexDirection = "";
+    } else {
+      el.style.gridTemplateColumns = tracks.join(" ");
+      el.style.gridTemplateRows = "minmax(0, 1fr)";
+      el.style.flexDirection = "";
+    }
+  },
+  ensureGutters(el) {
+    if (el.dataset.splitReady === "1") {
+      this.applySplit(el);
+      return;
+    }
+    const dir = el.dataset.splitDir || "h";
+    const kids = this.panes(el);
+    kids.forEach((pane, i) => {
+      if (i === 0) return;
+      const g = document.createElement("div");
+      g.className = "gutter";
+      g.dataset.gutter = String(i - 1);
+      g.title = tr("set.layoutHint");
+      el.insertBefore(g, pane);
+      this.bindGutter(el, g, i - 1, dir);
+    });
+    el.dataset.splitReady = "1";
+    this.applySplit(el);
+  },
+  bindGutter(el, gutter, index, dir) {
+    const minPx = 72;
+    const onDown = (e) => {
+      if (e.button != null && e.button !== 0) return;
+      e.preventDefault();
+      const panes = this.panes(el);
+      const a = panes[index], b = panes[index + 1];
+      if (!a || !b) return;
+      const start = dir === "v" ? e.clientY : e.clientX;
+      const a0 = dir === "v" ? a.getBoundingClientRect().height : a.getBoundingClientRect().width;
+      const b0 = dir === "v" ? b.getBoundingClientRect().height : b.getBoundingClientRect().width;
+      const total = a0 + b0;
+      const dims0 = panes.map((p) => {
+        const r = p.getBoundingClientRect();
+        return dir === "v" ? r.height : r.width;
+      });
+      const pair = a0 + b0;
+      gutter.classList.add("is-drag");
+      document.body.classList.add(dir === "v" ? "is-resizing-v" : "is-resizing-h");
+      const move = (ev) => {
+        const now = dir === "v" ? ev.clientY : ev.clientX;
+        let na = a0 + (now - start);
+        let nb = pair - na;
+        if (na < minPx) { na = minPx; nb = pair - minPx; }
+        if (nb < minPx) { nb = minPx; na = pair - minPx; }
+        const dims = dims0.slice();
+        dims[index] = na;
+        dims[index + 1] = nb;
+        const sum = dims.reduce((x, y) => x + y, 0) || 1;
+        this.data.splits[el.dataset.split] = dims.map((s) => Math.round((s / sum) * 1000) / 10);
+        this.applySplit(el);
+      };
+      const up = () => {
+        gutter.classList.remove("is-drag");
+        document.body.classList.remove("is-resizing-v", "is-resizing-h");
+        document.removeEventListener("mousemove", move);
+        document.removeEventListener("mouseup", up);
+        const panes2 = this.panes(el);
+        const dims = panes2.map((p) => {
+          const r = p.getBoundingClientRect();
+          return dir === "v" ? r.height : r.width;
+        });
+        const sum = dims.reduce((x, y) => x + y, 0) || 1;
+        this.data.splits[el.dataset.split] = dims.map((s) => Math.round((s / sum) * 1000) / 10);
+        this.save();
+      };
+      document.addEventListener("mousemove", move);
+      document.addEventListener("mouseup", up);
+    };
+    gutter.addEventListener("mousedown", onDown);
+    gutter.addEventListener("dblclick", () => {
+      const def = this.defaults.splits[el.dataset.split];
+      if (def) this.data.splits[el.dataset.split] = def.slice();
+      this.applySplit(el);
+      this.save();
+    });
+  },
+  refresh() {
+    $$("[data-split]").forEach((el) => this.ensureGutters(el));
+  },
+  resetLayout() {
+    this.data.splits = { ...this.defaults.splits };
+    this.save();
+    this.refresh();
+  },
+  resetVisual() {
+    this.data.theme = this.defaults.theme;
+    this.data.uiScale = this.defaults.uiScale;
+    this.data.editorScale = this.defaults.editorScale;
+    this.data.showTag = true;
+    this.data.splits = { ...this.defaults.splits };
+    this.save();
+    applyTheme("dark");
+    this.applyChrome();
+    this.refresh();
+  },
+  open(tab) {
+    const ov = $("#settingsOverlay");
+    if (!ov) return;
+    ov.classList.remove("hidden");
+    const name = tab || "look";
+    $$("#settingsNav button").forEach((b) => b.classList.toggle("active", b.dataset.settab === name));
+    $$(".settings-pane").forEach((p) => p.classList.toggle("hidden", p.dataset.setpane !== name));
+    this.applyChrome();
+    $$("#setLangSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.lang === mebLang));
+    $$("#setThemeSwitch button").forEach((b) => b.classList.toggle("active", (document.documentElement.getAttribute("data-theme") || "dark") === b.dataset.theme));
+  },
+  close() {
+    $("#settingsOverlay")?.classList.add("hidden");
+  },
+  init() {
+    this.load();
+    this.applyChrome();
+    applyTheme(this.data.theme || localStorage.getItem("aura_theme") || "dark");
+    this.refresh();
+    $("#btnSettings")?.addEventListener("click", () => this.open("look"));
+    $("#btnSettingsClose")?.addEventListener("click", () => this.close());
+    $("#btnProxyOpenSettings")?.addEventListener("click", () => this.open("proxy"));
+    $("#settingsOverlay")?.addEventListener("click", (e) => {
+      if (e.target === $("#settingsOverlay")) this.close();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !$("#settingsOverlay")?.classList.contains("hidden")) this.close();
+    });
+    $$("#settingsNav button").forEach((b) => b.addEventListener("click", () => this.open(b.dataset.settab)));
+    $$("#setThemeSwitch button").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.theme)));
+    $$("#setLangSwitch button").forEach((b) => b.addEventListener("click", () => applyLang(b.dataset.lang)));
+    $("#setUiScale")?.addEventListener("input", () => {
+      this.data.uiScale = Number($("#setUiScale").value);
+      this.applyChrome();
+    });
+    $("#setUiScale")?.addEventListener("change", () => this.save());
+    $("#setEditorScale")?.addEventListener("input", () => {
+      this.data.editorScale = Number($("#setEditorScale").value);
+      this.applyChrome();
+    });
+    $("#setEditorScale")?.addEventListener("change", () => this.save());
+    $("#setShowTag")?.addEventListener("change", () => {
+      this.data.showTag = $("#setShowTag").checked;
+      this.applyChrome();
+      this.save();
+    });
+    $("#btnResetVisual")?.addEventListener("click", () => {
+      this.resetVisual();
+      if ($("#setVisualMsg")) $("#setVisualMsg").textContent = tr("set.resetDone");
+    });
+    $("#btnResetLayout")?.addEventListener("click", () => {
+      this.resetLayout();
+      if ($("#setLayoutMsg")) $("#setLayoutMsg").textContent = tr("set.layoutReset");
+    });
+  },
+};
+
+function applyLang(name) {
+  setLang(name);
+  applyI18nDom();
+  $$("#langSwitch button, #setLangSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.lang === mebLang));
+  refreshTranslatedUI();
 }
 
 const state = { pending: [], selectedFlow: null, histReq: "", histResp: "", histScheme: "https", intrResults: [] };
 
 async function api(path, opts = {}) {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json", ...(opts.headers || {}) }, ...opts });
-  if (!res.ok) { let msg = res.statusText; try { const d = await res.json(); msg = d.detail || JSON.stringify(d); } catch (_) {} throw new Error(msg); }
-  const ct = res.headers.get("content-type") || "";
-  return ct.includes("application/json") ? res.json() : res.text();
+  const method = (opts.method || "GET").toUpperCase();
+  const t0 = performance.now();
+  let logged = false;
+  try {
+    const res = await fetch(path, { headers: { "Content-Type": "application/json", ...(opts.headers || {}) }, ...opts });
+    const ms = Math.round(performance.now() - t0);
+    if (!res.ok) {
+      let msg = res.statusText;
+      try { const d = await res.json(); msg = d.detail || JSON.stringify(d); } catch (_) {}
+      DebugLog.log({ level: "error", module: "api", action: method + " " + path, msg, fields: { status: res.status, ms } });
+      logged = true;
+      throw new Error(msg);
+    }
+    if (method !== "GET" && !path.startsWith("/api/intercept") && path !== "/api/debug-log") {
+      DebugLog.log({ level: "info", module: "api", action: method + " " + path, msg: String(res.status), fields: { status: res.status, ms } });
+    }
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("application/json") ? res.json() : res.text();
+  } catch (err) {
+    if (isAbortError(err)) {
+      DebugLog.log({ level: "info", module: "api", action: method + " " + path, msg: "stopped" });
+      throw err;
+    }
+    if (!logged) {
+      DebugLog.log({ level: "error", module: "api", action: method + " " + path, msg: err && err.message ? err.message : String(err) });
+    }
+    throw err;
+  }
 }
 
 function showView(name) {
+  DebugLog.log({ level: "info", module: "nav", action: "view", msg: name, fields: { view: name } });
   $$(".view").forEach((el) => el.classList.add("hidden"));
   const pane = $(`#view-${name}`);
   if (pane) pane.classList.remove("hidden");
   $$("#mainTabs button").forEach((b) => b.classList.toggle("active", b.dataset.view === name));
+  if (UILayout && UILayout.data) {
+    UILayout.data.lastView = name;
+    UILayout.save();
+    requestAnimationFrame(() => UILayout.refresh());
+  }
   if (name === "intruder" && typeof intruder !== "undefined" && intruder.tabs.length === 0) newIntruderTab("");
   if (name === "discover" || name === "fuzz") loadSecLists();
   if (name === "map") { loadMap(); }
@@ -43,6 +490,11 @@ function showView(name) {
 function showSub(group, name) {
   $$(`${group} .subpane`).forEach((el) => el.classList.toggle("hidden", el.dataset.subpane !== name));
   $$(`${group} .subtabs button`).forEach((b) => b.classList.toggle("active", b.dataset.sub === name));
+  if (group === "#view-proxy" && UILayout && UILayout.data) {
+    UILayout.data.lastProxySub = name;
+    UILayout.save();
+  }
+  requestAnimationFrame(() => UILayout && UILayout.refresh());
 }
 
 const fmtBytes = (n) => n < 1024 ? `${n}B` : n < 1048576 ? `${(n/1024).toFixed(1)}k` : `${(n/1048576).toFixed(1)}M`;
@@ -80,7 +532,7 @@ function refreshDashboard() {
       <td>${esc(f.host)}</td>
       <td title="${esc(f.path)}">${esc(f.path).slice(0,60)}</td>
       <td class="${statusClass(f.status)}">${f.status||"—"}</td>
-      <td><button class="mini" data-act="rep" data-id="${f.id}">→Repeater</button> <button class="mini" data-act="intr" data-id="${f.id}">→Intruder</button></td>
+      <td><button class="mini" data-act="rep" data-id="${f.id}">${tr("dash.toReplay")}</button> <button class="mini" data-act="intr" data-id="${f.id}">${tr("dash.toPayloads")}</button></td>
     </tr>`).join("") || `<tr><td colspan="5" class="muted">${tr("empty.none")}</td></tr>`;
   });
 }
@@ -88,21 +540,22 @@ function refreshDashboard() {
 function renderPending(force = false) {
   const n = state.pending.length;
   $("#pendingBadge").classList.toggle("hidden", n === 0);
-  $("#pendingBadge").textContent = `${n} in queue`;
+  $("#pendingBadge").textContent = tr("proxy.inQueue", { n });
   $("#proxyDot").classList.toggle("hidden", n === 0);
   $("#interceptDot").classList.toggle("hidden", n === 0);
   const list = $("#interceptList");
-  list.innerHTML = n ? `<table><thead><tr><th>Time</th><th>Type</th><th>Dir</th><th>Method</th><th>URL</th></tr></thead><tbody>` +
+  list.innerHTML = n ? `<table><thead><tr><th>${tr("proxy.col.time")}</th><th>${tr("proxy.col.type")}</th><th>${tr("proxy.col.dir")}</th><th>${tr("proxy.col.method")}</th><th>${tr("proxy.col.url")}</th></tr></thead><tbody>` +
     state.pending.map((p, i) => `<tr data-i="${i}" class="${i === 0 ? "sel" : ""}">
       <td>${new Date((p.flow_id || 0) * 1000 || Date.now()).toLocaleTimeString()}</td>
       <td>HTTP</td>
-      <td>${p.phase === "response" ? "← resp" : "→ req"}</td>
+      <td>${p.phase === "response" ? tr("proxy.dir.resp") : tr("proxy.dir.req")}</td>
       <td class="method ${p.method}">${esc(p.method)}</td>
       <td>${esc(p.url)}</td>
     </tr>`).join("") + `</tbody></table>` : `<div class="muted" style="padding:12px">${tr("empty.queue")}</div>`;
   const cur = state.pending[0];
   if (!cur) { $("#interceptEditor").value = ""; $("#interceptMeta").textContent = ""; return; }
-  $("#interceptMeta").textContent = `${cur.phase.toUpperCase()}  ${cur.method}  ${cur.url}`;
+  const phase = cur.phase === "response" ? tr("proxy.phase.resp") : tr("proxy.phase.req");
+  $("#interceptMeta").textContent = `${phase}  ${cur.method}  ${cur.url}`;
   const raw = cur.phase === "response" ? cur.response_raw : cur.request_raw;
   if (force || document.activeElement !== $("#interceptEditor")) $("#interceptEditor").value = raw || "";
 }
@@ -171,19 +624,27 @@ function connectWs() {
   const ws = new WebSocket(`${proto}://${location.host}/api/ws`);
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
+    if (m.type === "intel_progress") MapLog.append(m);
     if (m.type === "hello") renderStatus({ ...m.status, stats: m.status.stats });
-    if (m.type === "flow") { loadHistory(); refreshDashboard(); loadSiteMap(); if (currentView() === "logger") loadLogs(); }
+    if (m.type === "flow") { loadHistory(); refreshDashboard(); loadSiteMap(); scheduleMapIngest(); if (currentView() === "logger") loadLogs(); }
     if (m.type === "intercept") { state.pending.push(m.item); renderPending(); }
     if (m.type === "intercept_done") { state.pending = state.pending.filter((p) => p.id !== m.id); renderPending(true); }
     if (m.type === "log") loadLogs();
     if (m.type === "history_cleared") loadHistory();
     if (m.type === "settings") loadStatus();
   };
-  ws.onclose = () => setTimeout(connectWs, 1500);
+  ws.onerror = () => DebugLog.log({ level: "error", module: "ws", action: "error", msg: "websocket error" });
+  ws.onclose = () => {
+    DebugLog.log({ level: "warn", module: "ws", action: "close", msg: "websocket closed" });
+    setTimeout(connectWs, 1500);
+  };
 }
 
 $$("#mainTabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
-$$("#proxySubtabs button").forEach((b) => b.addEventListener("click", () => showSub("#view-proxy", b.dataset.sub)));
+$$("#proxySubtabs button").forEach((b) => b.addEventListener("click", () => {
+  showSub("#view-proxy", b.dataset.sub);
+  if (b.dataset.sub === "settings") UILayout.open("proxy");
+}));
 
 $("#interceptReq").addEventListener("change", saveSettings);
 $("#interceptResp").addEventListener("change", saveSettings);
@@ -209,16 +670,30 @@ $("#btnLaunchBrowser").addEventListener("click", launchBrowser);
 
 $("#btnForward").addEventListener("click", async () => {
   const c = state.pending[0]; if (!c) return;
+  const id = c.id;
+  if (!id) { alert(tr("proxy.forwardErr", { msg: "no id" })); return; }
   let raw = $("#interceptEditor").value;
-  raw = applyMatchReplace(raw, c.phase);
-  await api(`/api/intercept/${c.id}`, { method: "POST", body: JSON.stringify({ action: "forward", raw }) });
+  try { raw = applyMatchReplace(raw, c.phase); } catch (e) { DebugLog.log({ level: "error", module: "proxy", action: "matchreplace", msg: e.message }); }
+  try {
+    await api(`/api/intercept/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action: "forward", raw }) });
+  } catch (e) {
+    DebugLog.log({ level: "error", module: "proxy", action: "forward", msg: e.message, fields: { id } });
+    alert(tr("proxy.forwardErr", { msg: e.message }));
+  }
 });
-$("#btnForwardAll").addEventListener("click", () => api("/api/intercept/forward-all", { method: "POST" }));
+$("#btnForwardAll").addEventListener("click", async () => {
+  try { await api("/api/intercept/forward-all", { method: "POST" }); }
+  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
+});
 $("#btnDrop").addEventListener("click", async () => {
   const c = state.pending[0]; if (!c) return;
-  await api(`/api/intercept/${c.id}`, { method: "POST", body: JSON.stringify({ action: "drop" }) });
+  try { await api(`/api/intercept/${encodeURIComponent(c.id)}`, { method: "POST", body: JSON.stringify({ action: "drop" }) }); }
+  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
 });
-$("#btnDropAll").addEventListener("click", () => api("/api/intercept/drop-all", { method: "POST" }));
+$("#btnDropAll").addEventListener("click", async () => {
+  try { await api("/api/intercept/drop-all", { method: "POST" }); }
+  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
+});
 $("#interceptList").addEventListener("click", (e) => {
   const tr = e.target.closest("tr"); if (!tr) return;
   const i = +tr.dataset.i;
@@ -230,8 +705,8 @@ $("#interceptList").addEventListener("click", (e) => {
 $("#btnWsOpenBrowser").addEventListener("click", launchBrowser);
 
 /* Match and replace */
-const mrRules = JSON.parse(localStorage.getItem("meb_mr_rules") || "[]");
-function saveMr() { localStorage.setItem("meb_mr_rules", JSON.stringify(mrRules)); }
+const mrRules = JSON.parse(localStorage.getItem("aura_mr_rules") || localStorage.getItem("meb_mr_rules") || "[]");
+function saveMr() { localStorage.setItem("aura_mr_rules", JSON.stringify(mrRules)); }
 function applyMatchReplace(raw, phase) {
   for (const r of mrRules) {
     if (!r.enabled) continue;
@@ -317,7 +792,7 @@ $$("#view-proxy .tabs.small button").forEach((b) => b.addEventListener("click", 
 const repeater = { tabs: [], active: 0, seq: 0 };
 function newRepeaterTab(raw) {
   repeater.seq++;
-  const def = "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: MEB/0.1\r\nAccept: */*\r\n\r\n";
+  const def = "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: AURA/0.1\r\nAccept: */*\r\n\r\n";
   const tab = { id: repeater.seq, name: String(repeater.seq), raw: raw || def, scheme: "https", target: "", response: "" };
   repeater.tabs.push(tab);
   repeater.active = repeater.tabs.length - 1;
@@ -357,9 +832,19 @@ $("#repTarget").addEventListener("input", () => { const t = curRep(); if (t) t.t
 
 $("#btnSend").addEventListener("click", async () => {
   const t = curRep(); if (!t) return;
-  $("#repMeta").textContent = "sending…";
   try {
-    const data = await api("/api/repeater", { method: "POST", body: JSON.stringify({ raw: $("#repReq").value, scheme: $("#repScheme").value, target: $("#repTarget").value.trim() || null }) });
+    const data = await runJob("repeater", {
+      label: tr("work.repeater"),
+      runBtn: $("#btnSend"),
+      stopBtn: $("#btnRepStop"),
+      meta: $("#repMeta"),
+      fn: (signal) => api("/api/repeater", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({ raw: $("#repReq").value, scheme: $("#repScheme").value, target: $("#repTarget").value.trim() || null }),
+      }),
+    });
+    if (!data || data.aborted) return;
     if (!data.ok) { $("#repMeta").textContent = data.error || "error"; $("#repResp").textContent = data.error || ""; t.response = data.error||""; return; }
     $("#repMeta").textContent = `${data.status} ${data.reason}  ${data.duration_ms}ms`;
     $("#repResp").textContent = data.response_raw || "";
@@ -386,7 +871,7 @@ const intruder = {
 };
 function newIntruderTab(template) {
   intruder.seq++;
-  const tab = { id: intruder.seq, name: String(intruder.seq), template: template || "", scheme: "https", target: "", attackType: "cluster_bomb", payloadSets: [""], results: [] };
+  const tab = { id: intruder.seq, name: String(intruder.seq), template: template || "", scheme: "https", target: "", attackType: "combo", payloadSets: [""], results: [] };
   intruder.tabs.push(tab);
   intruder.active = intruder.tabs.length - 1;
   renderIntruderTabs();
@@ -479,20 +964,34 @@ $("#btnIntrRun").addEventListener("click", async () => {
   const sets = t.payloadSets.map((p) => p.split("\n").map((x) => x.trim()).filter(Boolean));
   const positions = Math.floor((t.template.match(/§/g) || []).length / 2);
   if (positions === 0) { alert(tr("intr.noMarks")); return; }
-  // validate set count per attack type
-  if ((t.attackType === "sniper" || t.attackType === "battering_ram") && sets.length !== 1) { alert(tr("intr.needOneSet", { type: t.attackType, n: sets.length })); return; }
-  if ((t.attackType === "pitchfork" || t.attackType === "cluster_bomb") && sets.length !== positions) { alert(tr("intr.needNSets", { type: t.attackType, need: positions, n: sets.length })); return; }
+  const mode = ({ sniper: "one", battering_ram: "same", pitchfork: "zip", cluster_bomb: "combo" }[t.attackType] || t.attackType);
+  if ((mode === "one" || mode === "same") && sets.length !== 1) { alert(tr("intr.needOneSet", { type: tr("intr.mode." + mode), n: sets.length })); return; }
+  if ((mode === "zip" || mode === "combo") && sets.length !== positions) { alert(tr("intr.needNSets", { type: tr("intr.mode." + mode), need: positions, n: sets.length })); return; }
   if (sets.every((s) => s.length === 0)) { alert(tr("intr.emptySets")); return; }
   $("#btnIntrRun").disabled = true;
   t.results = [];
   try {
-    const data = await api("/api/batch/execute", {
-      method: "POST",
-      body: JSON.stringify({ template_raw: t.template, scheme: t.scheme, target: t.target, attack_type: t.attackType, payload_sets: sets }),
+    const data = await runJob("intruder", {
+      label: tr("work.intruder"),
+      runBtn: $("#btnIntrRun"),
+      stopBtn: $("#btnIntrStop"),
+      fn: (signal) => api("/api/batch/execute", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          template_raw: t.template,
+          scheme: t.scheme,
+          target: t.target,
+          attack_type: t.attackType,
+          payload_sets: sets,
+          workers: Number($("#intrWorkers")?.value) || 10,
+          rps: Number($("#intrRps")?.value) || 50,
+        }),
+      }),
     });
+    if (!data || data.aborted) return;
     t.results = data || []; renderIntruderResults();
   } catch (e) { alert(e.message); }
-  $("#btnIntrRun").disabled = false;
 });
 $("#btnIntrToIntruder").addEventListener("click", () => {
   const t = curIntr(); if (!t) return;
@@ -512,12 +1011,12 @@ $("#btnCallbackCopy").addEventListener("click", () => { const id = $("#callbackI
 $$("#targetSubtabs button").forEach((b) => b.addEventListener("click", () => showSub("#view-target", b.dataset.sub)));
 
 const scope = {
-  inc: JSON.parse(localStorage.getItem("meb_scope_inc") || "[]"),
-  exc: JSON.parse(localStorage.getItem("meb_scope_exc") || "[]"),
+  inc: JSON.parse(localStorage.getItem("aura_scope_inc") || localStorage.getItem("meb_scope_inc") || "[]"),
+  exc: JSON.parse(localStorage.getItem("aura_scope_exc") || localStorage.getItem("meb_scope_exc") || "[]"),
 };
 function saveScope() {
-  localStorage.setItem("meb_scope_inc", JSON.stringify(scope.inc));
-  localStorage.setItem("meb_scope_exc", JSON.stringify(scope.exc));
+  localStorage.setItem("aura_scope_inc", JSON.stringify(scope.inc));
+  localStorage.setItem("aura_scope_exc", JSON.stringify(scope.exc));
 }
 function scopePrefixMatch(prefix, subdomains, url) {
   if (!prefix) return false;
@@ -706,12 +1205,10 @@ $("#btnCompare").addEventListener("click", () => {
 /* Sequencer */
 $("#btnSeqAnalyze").addEventListener("click", async () => {
   const tokens = $("#seqTokens").value;
-  $("#btnSeqAnalyze").disabled = true;
-  try {
+  await withWork(tr("work.running"), $("#btnSeqAnalyze"), async () => {
     const rep = await api("/api/sequencer/analyze", { method: "POST", body: JSON.stringify({ tokens }) });
     renderSequencer(rep);
-  } catch (e) { alert(e.message); }
-  $("#btnSeqAnalyze").disabled = false;
+  }).catch((e) => alert(e.message));
 });
 $("#btnSeqClear").addEventListener("click", () => { $("#seqTokens").value = ""; $("#seqResults").innerHTML = `<p class="muted">${tr("seq.results")}</p>`; $("#seqCount").textContent = ""; });
 $("#seqTokens").addEventListener("input", () => {
@@ -957,21 +1454,25 @@ $("#btnDiscRun").addEventListener("click", async () => {
   const custom = $("#discWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#discWlSelect")?.value || "";
   if (!base || (custom.length === 0 && !path)) { alert(tr("disc.need")); return; }
-  $("#btnDiscRun").disabled = true; $("#discMeta").textContent = tr("disc.scanning");
   $("#discBody").innerHTML = "";
   try {
-    const data = await api("/api/discover/run", { method: "POST", body: JSON.stringify({
-      base_url: base, wordlist: custom, wordlist_path: custom.length ? "" : path,
-      workers: +$("#discWorkers").value || 10,
-      rps: +$("#discRps").value || 20, cookies: $("#discCookies").value,
-    }) });
+    const data = await runJob("discover", {
+      label: tr("work.discover"),
+      runBtn: $("#btnDiscRun"),
+      stopBtn: $("#btnDiscStop"),
+      meta: $("#discMeta"),
+      fn: (signal) => api("/api/discover/run", { method: "POST", signal, body: JSON.stringify({
+        base_url: base, wordlist: custom, wordlist_path: custom.length ? "" : path,
+        workers: +$("#discWorkers").value || 10,
+        rps: +$("#discRps").value || 20, cookies: $("#discCookies").value,
+      }) }),
+    });
+    if (!data || data.aborted) return;
     discCache = data || [];
     renderDisc(discCache);
     $("#discMeta").textContent = tr("disc.nResults", { n: discCache.length });
   } catch (e) { alert(e.message); $("#discMeta").textContent = ""; }
-  $("#btnDiscRun").disabled = false;
 });
-$("#btnDiscStop").addEventListener("click", () => { /* best-effort: results already returned */ });
 function renderDisc(rows) {
   const q = ($("#discFilter").value || "").toLowerCase();
   const hide2 = $("#discHide2xx").checked, hide404 = $("#discHide404").checked;
@@ -995,19 +1496,59 @@ $("#discHide404").addEventListener("change", () => { if (discCache.length) rende
 let discCache = [];
 
 /* Scanner */
+function rawGetFromTarget(target) {
+  let host = String(target || "").trim();
+  if (!host) return "";
+  let path = "/";
+  try {
+    const u = new URL(host.includes("://") ? host : "https://" + host);
+    host = u.host;
+    path = u.pathname || "/";
+    if (u.search) path += u.search;
+  } catch (_) {}
+  if (!host) return "";
+  return `GET ${path} HTTP/1.1\r\nHost: ${host}\r\nUser-Agent: AURA/0.1\r\nAccept: */*\r\n\r\n`;
+}
 $("#btnScanRun").addEventListener("click", async () => {
   let raw = $("#scanRaw").value;
-  if (!raw.trim()) { alert(tr("scan.need")); return; }
-  $("#btnScanRun").disabled = true; $("#scanMeta").textContent = tr("scan.scanning");
+  if (!raw.trim() && $("#scanFromHistory")?.checked && state.histReq) {
+    raw = state.histReq;
+    $("#scanRaw").value = raw;
+  }
+  if (!raw.trim()) {
+    const target = $("#scanTarget").value.trim();
+    raw = rawGetFromTarget(target);
+    if (raw) {
+      $("#scanRaw").value = raw;
+      let host = target, path = "/";
+      try {
+        const u = new URL(target.includes("://") ? target : "https://" + target);
+        host = u.host;
+        path = (u.pathname || "/") + (u.search || "");
+      } catch (_) {}
+      $("#scanMeta").textContent = tr("scan.usingGet", { host, path });
+    }
+  }
+  if (!raw.trim()) {
+    $("#scanMeta").textContent = tr("scan.need");
+    $("#scanRaw")?.focus();
+    return;
+  }
   $("#scanBody").innerHTML = "";
   try {
-    const data = await api("/api/scanner/scan", { method: "POST", body: JSON.stringify({
-      raw, scheme: $("#scanScheme").value, target: $("#scanTarget").value.trim(),
-    }) });
+    const data = await runJob("scanner", {
+      label: tr("work.scan"),
+      runBtn: $("#btnScanRun"),
+      stopBtn: $("#btnScanStop"),
+      meta: $("#scanMeta"),
+      fn: (signal) => api("/api/scanner/scan", { method: "POST", signal, body: JSON.stringify({
+        raw, scheme: $("#scanScheme").value, target: $("#scanTarget").value.trim(),
+      }) }),
+    });
+    if (!data || data.aborted) return;
     renderScan(data || { findings: [] });
     $("#scanMeta").textContent = `${(data.findings||[]).length} findings, ${(data.took/1e9).toFixed(1)}s`;
-  } catch (e) { alert(e.message); $("#scanMeta").textContent = ""; }
-  $("#btnScanRun").disabled = false;
+  } catch (e) { $("#scanMeta").textContent = e.message; }
 });
 function renderScan(res) {
   const sev = { high: "status-red", medium: "status-orange", low: "status-yellow" };
@@ -1089,28 +1630,188 @@ function renderExt() {
 let mapState = { target: null, catalog: [], stages: [], artifacts: [], map: null };
 
 async function loadMap() {
+  const skipIngest = anyMapRunning();
   if (!mapState.target) {
-    const saved = localStorage.getItem("meb_map_id");
-    if (!saved) return;
-    try {
-      renderMapSnapshot(await api(`/api/intel/targets/${saved}`));
-    } catch (_) {
-      localStorage.removeItem("meb_map_id");
+    const saved = localStorage.getItem("aura_map_id") || localStorage.getItem("meb_map_id");
+    if (saved) {
+      try {
+        const path = skipIngest ? `/api/intel/targets/${saved}` : `/api/intel/targets/${saved}/ingest-history`;
+        const data = skipIngest ? await api(path) : await api(path, { method: "POST" });
+        renderMapSnapshot(data);
+        return;
+      } catch (_) {
+        try {
+          renderMapSnapshot(await api(`/api/intel/targets/${saved}`));
+          return;
+        } catch (__) {
+          localStorage.removeItem("aura_map_id");
+          localStorage.removeItem("meb_map_id");
+        }
+      }
     }
-  } else {
+    await suggestMapFromProxy();
+    return;
+  }
+  try {
+    if (skipIngest) {
+      renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}`));
+    } else {
+      renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}/ingest-history`, { method: "POST" }));
+    }
+  } catch (_) {
     renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}`));
   }
 }
 
+async function ingestMapHistory() {
+  if (!mapState.target || anyMapRunning()) return;
+  renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}/ingest-history`, { method: "POST" }));
+}
+
+function mapJobId(stageId) { return "map:" + stageId; }
+function anyMapRunning() { return Jobs.prefix("map:").length > 0; }
+let mapIngestTimer = null;
+function scheduleMapIngest() {
+  if (anyMapRunning()) return;
+  if (!mapState.target) {
+    if (!$("#mapWork") || $("#mapWork").classList.contains("hidden")) suggestMapFromProxy();
+    return;
+  }
+  clearTimeout(mapIngestTimer);
+  mapIngestTimer = setTimeout(() => { ingestMapHistory().catch(() => {}); }, 700);
+}
+
+async function suggestMapFromProxy() {
+  const box = $("#mapProxyHosts");
+  if (!box) return;
+  try {
+    const data = await api("/api/history?limit=400");
+    const counts = new Map();
+    for (const f of data.items || []) {
+      let h = String(f.host || "").toLowerCase();
+      if (!h || h === "127.0.0.1" || h === "localhost" || h.startsWith("127.0.0.1:")) continue;
+      counts.set(h, (counts.get(h) || 0) + 1);
+    }
+    const hosts = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+    if (!hosts.length) {
+      box.innerHTML = `<p class="muted">${tr("map.noProxyYet")}</p>`;
+      return;
+    }
+    box.innerHTML = `<p class="muted">${tr("map.fromProxy")}</p><div class="map-host-list">${
+      hosts.map(([h, n]) => `<button type="button" class="mini" data-map-host="${esc(h)}">${esc(h)} · ${n}</button>`).join("")
+    }</div>`;
+  } catch (_) {
+    box.innerHTML = `<p class="muted">${tr("map.noProxyYet")}</p>`;
+  }
+}
+
+function clipText(s, n) {
+  s = String(s || "");
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+function intelProgressLine(m) {
+  if (!m) return "";
+  const vars = {
+    stage: m.stage ? tr("stage." + m.stage + ".title") : "",
+    n: m.n ?? 0,
+    total: m.total ?? 0,
+    url: m.url || "",
+    host: m.host || "",
+    status: m.status || "",
+    err: m.err || "",
+    value: m.value || m.url || m.host || "",
+    timeout: m.timeout || "",
+  };
+  let action = m.action || "";
+  if (action === "get" && m.timeout) action = "getWait";
+  if (action === "hit" && m.status) action = "hitStatus";
+  const key = "map.prog." + action;
+  let line = tr(key, vars);
+  if (!line || line === key) line = m.msg || "";
+  if (vars.stage && line && m.action !== "start") line = vars.stage + " · " + line;
+  return line;
+}
+
+const MapLog = {
+  items: [],
+  last: {},
+  max: 400,
+  latest() {
+    return this.items.length ? this.items[this.items.length - 1].line : "";
+  },
+  lastFor(stage) {
+    return this.last[stage] || "";
+  },
+  append(ev) {
+    const line = intelProgressLine(ev);
+    if (!line) return;
+    const prev = this.items[this.items.length - 1];
+    if (prev && prev.line === line) return;
+    this.items.push({ ...ev, line });
+    if (this.items.length > this.max) this.items.splice(0, this.items.length - this.max);
+    if (ev && ev.stage) this.last[ev.stage] = line;
+    this.render();
+    const live = ev && ev.stage ? document.querySelector(`.stage-card[data-stage="${ev.stage}"] .stage-live`) : null;
+    if (live) live.textContent = line;
+    if (Jobs.prefix("map:").length) setWork(line);
+  },
+  clear() {
+    this.items = [];
+    this.last = {};
+    this.render();
+  },
+  render() {
+    const el = $("#mapLog");
+    if (!el) return;
+    el.dataset.empty = tr("map.logIdle");
+    el.textContent = this.items.map((x) => x.line).join("\n");
+    el.scrollTop = el.scrollHeight;
+  },
+};
+
+function clearMapWorkspace() {
+  mapState = { target: null, catalog: [], stages: [], artifacts: [], map: null };
+  try {
+    localStorage.removeItem("aura_map_id");
+    localStorage.removeItem("meb_map_id");
+  } catch (_) {}
+  $("#mapEmpty")?.classList.remove("hidden");
+  $("#mapWork")?.classList.add("hidden");
+  if ($("#mapStats")) $("#mapStats").innerHTML = "";
+  if ($("#mapStages")) $("#mapStages").innerHTML = "";
+  if ($("#mapTree")) $("#mapTree").innerHTML = "";
+  if ($("#mapMeta")) $("#mapMeta").textContent = "";
+  const detail = $("#mapDetail");
+  if (detail) detail.textContent = tr("map.pickNode");
+  MapLog.clear();
+  suggestMapFromProxy();
+}
+
+function displayMapHost(h, base) {
+  const host = String(h.host || "");
+  try {
+    const u = new URL(base);
+    if (u.hostname.toLowerCase() === host.toLowerCase() && u.port) return host + ":" + u.port;
+  } catch (_) {}
+  return host;
+}
+
 function renderMapSnapshot(data) {
   mapState = { ...mapState, ...data, target: data.target };
-  if (data.target?.id) localStorage.setItem("meb_map_id", data.target.id);
+  if (data.target?.id) localStorage.setItem("aura_map_id", data.target.id);
   $("#mapEmpty").classList.toggle("hidden", !!data.target);
   $("#mapWork").classList.toggle("hidden", !data.target);
-  if (!data.target) return;
-  $("#mapTarget").value = data.target.base_url || data.target.domain || "";
+  if (!data.target) {
+    clearMapWorkspace();
+    return;
+  }
+  const field = $("#mapTarget");
+  if (field && document.activeElement !== field) {
+    field.value = data.target.base_url || data.target.domain || "";
+  }
   $("#mapAuth").checked = !!data.target.authorized;
-  $("#mapMeta").textContent = data.target.domain + (data.target.authorized ? tr("map.ownTarget") : tr("map.passiveOnly"));
+  $("#mapMeta").textContent = (data.target.base_url || data.target.domain) + (data.target.authorized ? tr("map.ownTarget") : tr("map.passiveOnly"));
   const st = data.map?.stats || {};
   $("#mapStats").innerHTML = [
     [tr("map.statHosts"), st.live_hosts ?? 0],
@@ -1123,22 +1824,35 @@ function renderMapSnapshot(data) {
   const byId = Object.fromEntries((data.stages || []).map((s) => [s.id, s]));
   $("#mapStages").innerHTML = (data.catalog || []).map((c, i) => {
     const s = byId[c.id] || { status: "idle" };
-    const busy = s.status === "running";
-    return `<article class="stage-card ${s.status}" data-stage="${c.id}">
+    const busy = s.status === "running" || Jobs.running(mapJobId(c.id));
+    const status = busy ? "running" : (s.status || "idle");
+    const stKey = "map.status." + status;
+    let summary = s.summary || "";
+    if (summary === "stopped" || summary === "остановлено") summary = tr("work.stopped");
+    if (summary && !busy) summary = clipText(summary, 160);
+    const live = busy ? (MapLog.lastFor(c.id) || tr("map.stageWork." + c.id)) : "";
+    return `<article class="stage-card ${status}" data-stage="${c.id}">
       <div class="stage-head">
         <h3>${i + 1}. ${esc(tr("stage." + c.id + ".title"))}</h3>
-        <span class="stage-mode ${c.mode}">${c.mode === "active" ? tr("map.modeActive") : tr("map.modePassive")} · ${esc(s.status || "idle")}</span>
+        <span class="stage-mode ${c.mode}">${c.mode === "active" ? tr("map.modeActive") : tr("map.modePassive")} · ${esc(tr(stKey))}</span>
       </div>
       <p>${esc(tr("stage." + c.id + ".hint"))}</p>
-      ${s.summary ? `<p>${esc(s.summary)}</p>` : ""}
-      <div class="toolbar">
-        <button class="primary mini" data-run="${c.id}" ${busy ? "disabled" : ""}>${tr("map.run")}</button>
-        ${c.id === "dirs" ? `<button class="mini" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
-        ${c.id === "params" ? `<button class="mini" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
+      ${summary && !busy ? `<p>${esc(summary)}</p>` : ""}
+      ${busy ? `<p class="stage-live">${esc(live)}</p>` : ""}
+      ${busy ? `<div class="stage-progress" aria-hidden="true"><span></span></div>` : ""}
+      <div class="toolbar job-actions">
+        <button type="button" class="primary mini${busy ? " is-busy" : ""}" data-run="${c.id}" ${busy ? "disabled" : ""}>${busy ? `<span class="spin"></span>${tr("map.running")}` : tr("map.run")}</button>
+        <button type="button" class="mini danger" data-stop="${c.id}" ${busy ? "" : "disabled"}>${tr("map.stop")}</button>
+        ${c.id === "dirs" ? `<button type="button" class="mini" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
+        ${c.id === "params" ? `<button type="button" class="mini" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
       </div>
     </article>`;
   }).join("");
   renderAppMap(data.map);
+  requestAnimationFrame(() => {
+    if (UILayout && UILayout.refresh) UILayout.refresh();
+    MapLog.render();
+  });
 }
 
 function renderAppMap(m) {
@@ -1149,17 +1863,20 @@ function renderAppMap(m) {
     return;
   }
   tree.innerHTML = hosts.map((h) => {
+    const label = displayMapHost(h, m.base_url);
     const paths = (h.paths || []).map((p) => {
+      let path = p.path || "/";
+      if (path !== "/" && !path.startsWith("/")) path = "/" + path;
       const bits = [p.status, (p.params || []).length ? `params ${(p.params || []).join(", ")}` : ""].filter(Boolean).join(" · ");
-      return `<div class="tree-row tree-leaf" data-host="${esc(h.host)}" data-path="${esc(p.path)}">
-        <span class="tree-icon">/</span><span>${esc(p.path)}</span>
+      return `<div class="tree-row tree-leaf" data-host="${esc(h.host)}" data-path="${esc(path)}">
+        <span class="tree-path">${esc(path)}</span>
         <span class="tree-status">${esc(bits)}</span>
       </div>`;
     }).join("");
     return `<div class="tree-node">
       <div class="tree-row" data-host="${esc(h.host)}">
         <span class="tree-icon">${h.live ? "●" : "○"}</span>
-        <strong>${esc(h.host)}</strong>
+        <strong>${esc(label)}</strong>
         <span class="tree-status">${esc((h.tech || []).join(", "))}</span>
       </div>
       <div class="tree-children">${paths || `<div class="muted" style="padding:4px 12px">${tr("map.noPaths")}</div>`}</div>
@@ -1167,34 +1884,116 @@ function renderAppMap(m) {
   }).join("");
 }
 
+$("#mapTarget")?.addEventListener("input", () => {
+  if (!$("#mapTarget").value.trim() && mapState.target) clearMapWorkspace();
+});
+$("#btnMapClear")?.addEventListener("click", () => {
+  if ($("#mapTarget")) $("#mapTarget").value = "";
+  if ($("#mapAuth")) $("#mapAuth").checked = false;
+  clearMapWorkspace();
+});
 $("#mapForm").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!$("#mapTarget").value.trim()) {
+    clearMapWorkspace();
+    return;
+  }
+  const startBtn = $("#btnMapStart");
+  markBusy(startBtn, true, tr("map.starting"));
+  setWork(tr("map.starting"));
   try {
     const data = await api("/api/intel/targets", {
       method: "POST",
       body: JSON.stringify({ target: $("#mapTarget").value.trim(), authorized: $("#mapAuth").checked }),
     });
     renderMapSnapshot(data);
+    setWork(tr("map.ingesting"));
+    MapLog.append({ msg: tr("map.ingesting") });
+    let n = 0;
+    try {
+      const ing = await api(`/api/intel/targets/${data.target.id}/ingest-history`, { method: "POST" });
+      n = ing.ingested || 0;
+      renderMapSnapshot(ing);
+    } catch (_) {}
+    $("#mapMeta").textContent = tr("map.startedOk", { host: data.target.base_url || data.target.domain || "", n });
   } catch (err) { alert(err.message); }
+  finally {
+    markBusy(startBtn, false);
+    Jobs.syncBar();
+  }
+});
+$("#mapProxyHosts")?.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-map-host]");
+  if (!b) return;
+  $("#mapTarget").value = b.dataset.mapHost;
+  $("#mapAuth").checked = true;
+  $("#mapForm").requestSubmit();
 });
 $("#mapStages").addEventListener("click", async (e) => {
   const jump = e.target.closest("[data-jump]");
   if (jump) { showView(jump.dataset.jump); return; }
+  const stop = e.target.closest("[data-stop]");
+  if (stop) {
+    const stageId = stop.dataset.stop;
+    Jobs.stop(mapJobId(stageId));
+    MapLog.append({ stage: stageId, action: "stop" });
+    mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "idle", summary: "stopped" } : s);
+    renderMapSnapshot(mapState);
+    $("#mapMeta").textContent = tr("work.stopped");
+    return;
+  }
   const btn = e.target.closest("[data-run]");
-  if (!btn || !mapState.target) return;
-  btn.disabled = true;
+  if (!btn || !mapState.target || btn.disabled) return;
+  const stageId = btn.dataset.run;
+  const jobId = mapJobId(stageId);
+  if (Jobs.running(jobId)) return;
+  const hint = tr("map.stageWork." + stageId);
+  const label = hint && hint !== "map.stageWork." + stageId ? hint : tr("map.stageWorking");
+  const signal = Jobs.start(jobId, label);
+  MapLog.append({ stage: stageId, action: "start", host: mapState.target.domain || mapState.target.base_url || "" });
+  mapState.stages = [...(mapState.stages || []).filter((s) => s.id !== stageId), { id: stageId, status: "running", summary: "" }];
+  renderMapSnapshot(mapState);
   try {
-    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${btn.dataset.run}`, { method: "POST" });
+    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${stageId}`, { method: "POST", signal });
+    Jobs.finish(jobId);
     renderMapSnapshot(data);
-    if (data.error) $("#mapMeta").textContent = data.error;
-  } catch (err) { alert(err.message); }
+    if (data.stopped) $("#mapMeta").textContent = tr("work.stopped");
+    else if (data.error) {
+      MapLog.append({ stage: stageId, action: "err", err: data.error, host: mapState.target.domain || "" });
+      $("#mapMeta").textContent = clipText(data.error, 180);
+    }
+    else $("#mapMeta").textContent = data.run?.stage?.summary || tr("map.startedOk", { host: mapState.target.domain, n: data.run?.added || 0 });
+  } catch (err) {
+    Jobs.finish(jobId);
+    if (isAbortError(err)) {
+      $("#mapMeta").textContent = tr("work.stopped");
+      try {
+        const snap = await api(`/api/intel/targets/${mapState.target.id}`);
+        const stages = (snap.stages || []).map((s) => s.id === stageId && s.status === "running"
+          ? { ...s, status: "idle", summary: "stopped" } : s);
+        renderMapSnapshot({ ...snap, stages });
+      } catch (_) {
+        mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "idle", summary: "stopped" } : s);
+        renderMapSnapshot(mapState);
+      }
+      return;
+    }
+    alert(err.message);
+    MapLog.append({ stage: stageId, action: "err", err: err.message });
+    mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "error", summary: err.message } : s);
+    renderMapSnapshot(mapState);
+  }
 });
 $("#btnMapHistory").addEventListener("click", async () => {
   if (!mapState.target) return;
-  try { renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}/ingest-history`, { method: "POST" })); }
-  catch (err) { alert(err.message); }
+  await withWork(tr("work.history"), $("#btnMapHistory"), async () => {
+    renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}/ingest-history`, { method: "POST" }));
+  }).catch((err) => alert(err.message));
 });
-$("#btnMapRefresh").addEventListener("click", loadMap);
+$("#btnMapRefresh").addEventListener("click", async () => {
+  await withWork(tr("work.history"), $("#btnMapRefresh"), loadMap).catch((err) => alert(err.message));
+});
+$("#btnMapLogClear")?.addEventListener("click", () => MapLog.clear());
 $("#mapTree").addEventListener("click", (e) => {
   const row = e.target.closest("[data-host]");
   if (!row) return;
@@ -1235,21 +2034,28 @@ $("#btnFuzzRun")?.addEventListener("click", async () => {
   const hide = ($("#fuzzHide").value || "").split(",").map((s) => Number(s.trim())).filter(Boolean);
   const custom = $("#fuzzWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#fuzzWlSelect")?.value || "";
-  $("#fuzzMeta").textContent = "running…";
   try {
-    const data = await api("/api/fuzz/run", {
-      method: "POST",
-      body: JSON.stringify({
-        url: $("#fuzzUrl").value.trim(),
-        method: $("#fuzzMethod").value,
-        body: $("#fuzzBody").value,
-        wordlist: custom,
-        wordlist_path: custom.length ? "" : path,
-        workers: Number($("#fuzzWorkers").value),
-        rps: Number($("#fuzzRps").value),
-        hide,
+    const data = await runJob("fuzz", {
+      label: tr("work.fuzz"),
+      runBtn: $("#btnFuzzRun"),
+      stopBtn: $("#btnFuzzStop"),
+      meta: $("#fuzzMeta"),
+      fn: (signal) => api("/api/fuzz/run", {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          url: $("#fuzzUrl").value.trim(),
+          method: $("#fuzzMethod").value,
+          body: $("#fuzzBody").value,
+          wordlist: custom,
+          wordlist_path: custom.length ? "" : path,
+          workers: Number($("#fuzzWorkers").value),
+          rps: Number($("#fuzzRps").value),
+          hide,
+        }),
       }),
     });
+    if (!data || data.aborted) return;
     const items = data.items || [];
     $("#fuzzBodyRows").innerHTML = items.map((h) => `<tr>
       <td>${esc(h.payload)}</td>
@@ -1265,6 +2071,7 @@ $("#btnFuzzRun")?.addEventListener("click", async () => {
 function refreshTranslatedUI() {
   try { renderPending(); } catch (_) {}
   try { if (typeof mapState !== "undefined" && mapState.target) renderMapSnapshot(mapState); } catch (_) {}
+  try { if (typeof MapLog !== "undefined") MapLog.render(); } catch (_) {}
   try { renderMr(); } catch (_) {}
   try { renderScope(); } catch (_) {}
   try { renderExt(); } catch (_) {}
@@ -1279,11 +2086,18 @@ function refreshTranslatedUI() {
 }
 
 /* Init */
-try { applyTheme(localStorage.getItem("meb_theme") || "dark"); } catch (_) { applyTheme("dark"); }
+try { UILayout.init(); } catch (e) { DebugLog.log({ level: "error", module: "ui", action: "layout", msg: String(e) }); }
 try { applyLang(detectLang()); } catch (_) { applyLang("en"); }
+try { MapLog.render(); } catch (_) {}
 $$("#themeSwitch button").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.theme)));
 $$("#langSwitch button").forEach((b) => b.addEventListener("click", () => applyLang(b.dataset.lang)));
-showView("map");
+(function bootView() {
+  const allowed = new Set($$("#mainTabs button").map((b) => b.dataset.view));
+  const last = UILayout.data && UILayout.data.lastView;
+  showView(allowed.has(last) ? last : "map");
+  const sub = UILayout.data && UILayout.data.lastProxySub;
+  if (sub && sub !== "settings") showSub("#view-proxy", sub);
+})();
 loadStatus();
 loadHistory();
 loadIntercept();

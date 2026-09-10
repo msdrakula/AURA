@@ -1,6 +1,6 @@
-# MEB architecture
+# AURA architecture
 
-Local intercepting proxy plus a guided application map.
+Independent local intercepting proxy plus a guided application map (Advanced URL and Request Analyzer). Not affiliated with PortSwigger — see `LEGAL.md`.
 
 ## Layout
 

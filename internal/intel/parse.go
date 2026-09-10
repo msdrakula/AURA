@@ -2,33 +2,87 @@ package intel
 
 import (
 	"encoding/json"
+	"net"
 	"net/url"
 	"strings"
 )
 
-// NormalizeInput accepts a domain or URL and returns apex-ish domain + base URL.
+// NormalizeInput accepts a domain or URL and returns hostname (no port) plus a base URL.
+// A non-default port stays in the base URL. Missing ports use 80 for http and 443 for https
+// and are omitted from the printed URL.
 func NormalizeInput(raw string) (domain, baseURL string, err error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return "", "", errEmpty
 	}
 	if !strings.Contains(raw, "://") {
-		if strings.Contains(raw, "/") {
-			raw = "https://" + raw
-		} else {
-			return strings.ToLower(strings.TrimSuffix(raw, ".")), "https://" + strings.ToLower(raw), nil
-		}
+		raw = inferScheme(raw) + "://" + raw
 	}
 	u, perr := url.Parse(raw)
 	if perr != nil || u.Hostname() == "" {
 		return "", "", errBadInput
 	}
-	host := strings.ToLower(u.Hostname())
-	u.Fragment = ""
-	if u.Path == "" {
-		u.Path = "/"
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return "", "", errBadInput
 	}
-	return host, u.String(), nil
+	host := strings.ToLower(u.Hostname())
+	port := u.Port()
+	path := u.Path
+	if path == "" {
+		path = "/"
+	}
+	return host, joinBase(scheme, host, port, path, u.RawQuery), nil
+}
+
+func inferScheme(raw string) string {
+	head := raw
+	if i := strings.Index(raw, "/"); i >= 0 {
+		head = raw[:i]
+	}
+	if strings.HasPrefix(head, "[") {
+		return "https"
+	}
+	_, port, err := net.SplitHostPort(head)
+	if err == nil && (port == "80" || port == "8080" || port == "8000" || port == "8008") {
+		return "http"
+	}
+	return "https"
+}
+
+func defaultPort(scheme string) string {
+	if strings.ToLower(scheme) == "http" {
+		return "80"
+	}
+	return "443"
+}
+
+func joinBase(scheme, host, port, path, query string) string {
+	authority := host
+	if port != "" && port != defaultPort(scheme) {
+		authority = net.JoinHostPort(host, port)
+	}
+	if path == "" {
+		path = "/"
+	}
+	out := scheme + "://" + authority + path
+	if query != "" {
+		out += "?" + query
+	}
+	return out
+}
+
+// OriginURL is scheme://host with an explicit non-default port.
+func OriginURL(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Hostname() == "" {
+		return strings.TrimSpace(raw)
+	}
+	scheme := u.Scheme
+	if scheme == "" {
+		scheme = "https"
+	}
+	return joinBase(scheme, strings.ToLower(u.Hostname()), u.Port(), "/", "")
 }
 
 type simpleError string

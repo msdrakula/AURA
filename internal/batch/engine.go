@@ -80,11 +80,11 @@ func (e *Engine) Execute(
 	scheme, target string,
 	payloadSets [][]string,
 ) ([]models.BatchResult, error) {
-	return e.ExecuteAttack(ctx, template, scheme, target, "cluster_bomb", payloadSets)
+	return e.ExecuteAttack(ctx, template, scheme, target, "combo", payloadSets)
 }
 
-// ExecuteAttack runs an Intruder-style attack. attackType is one of:
-// "sniper", "battering_ram", "pitchfork", "cluster_bomb".
+// ExecuteAttack runs a payload attack. attackType is one of:
+// "one", "same", "zip", "combo" (legacy aliases still accepted).
 // The template contains § markers in pairs; each pair is one payload position.
 func (e *Engine) ExecuteAttack(
 	ctx context.Context,
@@ -201,7 +201,7 @@ func parsePositions(template string) (segments, originals []string) {
 
 // buildRequest reassembles the template substituting each position with its
 // payload. If a payload is the empty string and the position had original
-// text, the original is kept (used for Sniper's untouched positions).
+// text, the original is kept (used when a position is not filled).
 func buildRequest(segments, originals, payloads []string) string {
 	var b strings.Builder
 	for i, seg := range segments {
@@ -217,13 +217,28 @@ func buildRequest(segments, originals, payloads []string) string {
 	return b.String()
 }
 
+func normalizeAttackType(attackType string) string {
+	switch strings.ToLower(strings.TrimSpace(attackType)) {
+	case "one", "one_position", "sniper":
+		return "one"
+	case "same", "same_value", "battering_ram":
+		return "same"
+	case "zip", "paired", "pitchfork":
+		return "zip"
+	case "combo", "combinations", "cluster_bomb", "":
+		return "combo"
+	default:
+		return strings.ToLower(strings.TrimSpace(attackType))
+	}
+}
+
 // attackCombinations returns the list of payload arrays per request for the
 // given attack type and number of positions.
 func attackCombinations(attackType string, positions int, sets [][]string) ([][]string, error) {
-	switch attackType {
-	case "sniper":
+	switch normalizeAttackType(attackType) {
+	case "one":
 		if len(sets) != 1 {
-			return nil, fmt.Errorf("sniper requires exactly 1 payload set, got %d", len(sets))
+			return nil, fmt.Errorf("one-position mode requires exactly 1 payload set, got %d", len(sets))
 		}
 		set := sets[0]
 		out := make([][]string, 0, positions*len(set))
@@ -235,9 +250,9 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 			}
 		}
 		return out, nil
-	case "battering_ram":
+	case "same":
 		if len(sets) != 1 {
-			return nil, fmt.Errorf("battering_ram requires exactly 1 payload set, got %d", len(sets))
+			return nil, fmt.Errorf("same-value mode requires exactly 1 payload set, got %d", len(sets))
 		}
 		set := sets[0]
 		out := make([][]string, 0, len(set))
@@ -249,9 +264,9 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 			out = append(out, combo)
 		}
 		return out, nil
-	case "pitchfork":
+	case "zip":
 		if len(sets) != positions {
-			return nil, fmt.Errorf("pitchfork requires %d payload sets (one per position), got %d", positions, len(sets))
+			return nil, fmt.Errorf("paired mode requires %d payload sets (one per position), got %d", positions, len(sets))
 		}
 		minLen := len(sets[0])
 		for _, s := range sets[1:] {
@@ -268,9 +283,9 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 			out = append(out, combo)
 		}
 		return out, nil
-	case "cluster_bomb", "":
+	case "combo":
 		if len(sets) != positions {
-			return nil, fmt.Errorf("cluster_bomb requires %d payload sets (one per position), got %d", positions, len(sets))
+			return nil, fmt.Errorf("combinations mode requires %d payload sets (one per position), got %d", positions, len(sets))
 		}
 		return GenerateCombinations(sets), nil
 	default:

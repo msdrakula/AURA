@@ -48,13 +48,14 @@ func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
 	if len(words) <= 80 {
 		onResult = func(reqRaw, respRaw string) { s.saveToolFlow(reqRaw, respRaw, "", "discover") }
 	}
+	s.Log.Info("discover: run", zap.String("base_url", body.BaseURL), zap.Int("words", len(words)), zap.Int("workers", body.Workers))
 	results, err := discover.Run(ctx, discover.Options{
 		BaseURL: body.BaseURL, Wordlist: words,
 		Workers: body.Workers, RPS: body.RPS, Cookies: body.Cookies,
 		Timeout:  10 * time.Second,
 		OnResult: onResult,
 	}, s.Log)
-	if err != nil && err != context.DeadlineExceeded {
+	if err != nil && ctx.Err() == nil {
 		s.Log.Warn("discover: run", zap.Error(err))
 		writeErr(w, 500, err.Error())
 		return
@@ -87,14 +88,19 @@ func (s *Server) scannerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	// Log the baseline scan request.
 	s.saveToolFlow(body.Raw, "", body.Scheme, "scanner")
+	s.Log.Info("scanner: run", zap.String("scheme", body.Scheme), zap.String("target", body.Target))
 	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
 	defer cancel()
 	res, err := scanner.Scan(ctx, scanner.Options{
 		Raw: body.Raw, Scheme: body.Scheme, Target: body.Target, Timeout: 15 * time.Second,
 	})
-	if err != nil {
+	if err != nil && ctx.Err() == nil {
 		s.Log.Warn("scanner: run", zap.Error(err))
 		writeErr(w, 500, err.Error())
+		return
+	}
+	if res == nil {
+		writeJSON(w, 200, map[string]any{"findings": []any{}})
 		return
 	}
 	writeJSON(w, 200, res)

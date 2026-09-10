@@ -29,7 +29,7 @@ func TestEngineExecute(t *testing.T) {
 
 	eng := NewEngine(5, 100)
 
-	template := "GET /test?id=§&name=§ HTTP/1.1\r\nHost: " + target + "\r\nConnection: close\r\n\r\n"
+	template := "GET /test?id=§x§&name=§y§ HTTP/1.1\r\nHost: " + target + "\r\nConnection: close\r\n\r\n"
 	results, err := eng.Execute(context.Background(), template, "http", target, [][]string{
 		{"a", "b"},
 		{"1", "2"},
@@ -80,7 +80,7 @@ func TestExecuteCancelContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	template := "GET / HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
+	template := "GET /?q=§x§ HTTP/1.1\r\nHost: " + target + "\r\n\r\n"
 	_, err = eng.Execute(ctx, template, "http", target, [][]string{{"a", "b", "c", "d"}})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)

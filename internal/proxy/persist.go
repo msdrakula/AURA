@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"meb/internal/debuglog"
 	"meb/internal/httpio"
 	"meb/internal/models"
 )
@@ -21,6 +22,31 @@ func (s *Server) finish(id string, req *httpio.Request, resp *httpio.Response, s
 	if resp != nil && s.analyzer != nil {
 		s.analyzer.Persist(s.log, s.findings, id, req, resp)
 	}
+	logProxyFlow(id, req, resp, started, comment)
+}
+
+func logProxyFlow(id string, req *httpio.Request, resp *httpio.Response, started time.Time, comment string) {
+	fields := map[string]any{"id": id, "ms": time.Since(started).Milliseconds()}
+	if req != nil {
+		fields["method"] = req.Method
+		fields["host"] = req.Host
+		fields["path"] = req.Path
+		fields["scheme"] = req.Scheme
+	}
+	if resp != nil {
+		fields["status"] = resp.Status
+		fields["resp_bytes"] = len(resp.Body)
+	}
+	level := "info"
+	if comment != "" {
+		level = "warn"
+		fields["comment"] = comment
+	} else if resp != nil && resp.Status >= 500 {
+		level = "error"
+	} else if resp != nil && resp.Status >= 400 {
+		level = "warn"
+	}
+	debuglog.Write(debuglog.Event{Level: level, Src: "proxy", Module: "proxy", Action: "flow", Fields: fields})
 }
 
 func transactionFrom(id string, req *httpio.Request, resp *httpio.Response, started time.Time, comment string) *models.HTTPTransaction {

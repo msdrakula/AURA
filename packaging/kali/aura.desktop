@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.0
+Name=AURA
+GenericName=Advanced URL and Request Analyzer
+GenericName[ru]=Продвинутый анализатор URL и запросов
+Comment=Local intercepting proxy and advanced URL and request analyzer
+Comment[ru]=Локальный прокси и продвинутый анализатор URL и запросов
+Exec=aura
+Icon=aura
+Terminal=false
+Type=Application
+Categories=kali-web-vulnerability-scanning;kali-reconnaissance;
+Keywords=proxy;pentest;web;map;fuzz;aura;
+StartupNotify=true
+StartupWMClass=aura

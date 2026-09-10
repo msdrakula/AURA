@@ -24,9 +24,9 @@ type Finding struct {
 
 // ScanResult is the outcome of a scan.
 type ScanResult struct {
-	Findings []Finding `json:"findings"`
-	Count   int       `json:"count"`
-	Took    time.Duration `json:"took"`
+	Findings []Finding     `json:"findings"`
+	Count    int           `json:"count"`
+	Took     time.Duration `json:"took"`
 }
 
 // Options configure a scan.
@@ -168,7 +168,7 @@ var sqlErrors = []string{
 }
 
 func checkSQLi(ctx context.Context, opts Options, param, baseBody string) *Finding {
-	probe := "meb'||'test"
+	probe := "aura'||'test"
 	modified := injectParam(opts.Raw, param, probe)
 	if modified == opts.Raw {
 		// no param matched; append to path
@@ -191,7 +191,7 @@ func checkSQLi(ctx context.Context, opts Options, param, baseBody string) *Findi
 }
 
 func checkXSS(ctx context.Context, opts Options, param, baseBody string) *Finding {
-	probe := "mebxssprobe9x7q"
+	probe := "auraxssprobe9x7q"
 	modified := injectParam(opts.Raw, param, probe)
 	res := send(opts, modified)
 	if res == nil {
@@ -222,6 +222,9 @@ func checkPathTraversal(ctx context.Context, opts Options, param, baseBody strin
 		return nil
 	}
 	b := bodyOf(res.ResponseRaw)
+	if strings.Contains(baseBody, "root:") && strings.Contains(baseBody, ":/bin/") {
+		return nil
+	}
 	if strings.Contains(b, "root:") && strings.Contains(b, ":/bin/") {
 		return &Finding{
 			Name: "Path traversal", Severity: "high", Param: param,
@@ -232,17 +235,17 @@ func checkPathTraversal(ctx context.Context, opts Options, param, baseBody strin
 }
 
 func checkCommandInjection(ctx context.Context, opts Options, param, baseBody string) *Finding {
-	probe := ";echo mebcmd9x7q"
+	probe := ";echo auracmd9x7q"
 	modified := injectParam(opts.Raw, param, probe)
 	res := send(opts, modified)
 	if res == nil {
 		return nil
 	}
 	b := bodyOf(res.ResponseRaw)
-	if strings.Contains(b, "mebcmd9x7q") && !strings.Contains(baseBody, "mebcmd9x7q") {
+	if strings.Contains(b, "auracmd9x7q") && !strings.Contains(baseBody, "auracmd9x7q") {
 		return &Finding{
 			Name: "Command injection", Severity: "high", Param: param,
-			Evidence: "mebcmd9x7q", Description: "Output of injected echo command reflected in response.",
+			Evidence: "auracmd9x7q", Description: "Output of injected echo command reflected in response.",
 		}
 	}
 	return nil
@@ -280,13 +283,13 @@ func checkCORS(opts Options, headers string, base *repeater.Result) *Finding {
 		if strings.Contains(h, "access-control-allow-credentials: true") {
 			return &Finding{
 				Name: "CORS misconfiguration", Severity: "high",
-				Evidence: "ACAO: * with ACAC: true",
+				Evidence:    "ACAO: * with ACAC: true",
 				Description: "CORS reflects wildcard origin with credentials, allowing cross-site data theft.",
 			}
 		}
 		return &Finding{
 			Name: "CORS wildcard", Severity: "low",
-			Evidence: "Access-Control-Allow-Origin: *",
+			Evidence:    "Access-Control-Allow-Origin: *",
 			Description: "CORS allows any origin. Review if sensitive data is exposed.",
 		}
 	}
@@ -309,7 +312,7 @@ func checkMissingSecurityHeaders(resp string) *Finding {
 	if len(missing) > 0 {
 		return &Finding{
 			Name: "Missing security headers", Severity: "low",
-			Evidence: strings.Join(missing, ", "),
+			Evidence:    strings.Join(missing, ", "),
 			Description: "Response is missing security headers that harden the application.",
 		}
 	}

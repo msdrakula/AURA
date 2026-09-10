@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"meb/internal/fuzz"
 	"meb/internal/intel"
 	"meb/internal/wordlist"
@@ -65,7 +67,8 @@ func (s *Server) intelRunStage(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	stage := r.PathValue("stage")
 	res, err := s.Intel.RunStage(r.Context(), id, stage)
-	if err != nil && res.Added == 0 && res.Stage.Status != intel.StatusError {
+	stopped := r.Context().Err() != nil
+	if err != nil && !stopped && res.Added == 0 && res.Stage.Status != intel.StatusError {
 		writeErr(w, 400, err.Error())
 		return
 	}
@@ -74,6 +77,10 @@ func (s *Server) intelRunStage(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 500, snapErr.Error())
 		return
 	}
+	errMsg := ""
+	if !stopped {
+		errMsg = errString(err)
+	}
 	writeJSON(w, 200, map[string]any{
 		"run":       res,
 		"target":    t,
@@ -81,7 +88,8 @@ func (s *Server) intelRunStage(w http.ResponseWriter, r *http.Request) {
 		"catalog":   intel.Catalog(),
 		"artifacts": arts,
 		"map":       m,
-		"error":     errString(err),
+		"error":     errMsg,
+		"stopped":   stopped,
 	})
 }
 
@@ -197,6 +205,7 @@ func (s *Server) fuzzRun(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
+	s.Log.Info("fuzz: run", zap.String("url", body.URL), zap.Int("words", len(words)), zap.Int("workers", body.Workers))
 	hits, err := fuzz.Run(ctx, fuzz.Options{
 		URL:      body.URL,
 		Method:   body.Method,
@@ -208,7 +217,7 @@ func (s *Server) fuzzRun(w http.ResponseWriter, r *http.Request) {
 		Hide:     body.Hide,
 		Timeout:  8 * time.Second,
 	})
-	if err != nil && len(hits) == 0 {
+	if err != nil && len(hits) == 0 && ctx.Err() == nil {
 		writeErr(w, 400, err.Error())
 		return
 	}

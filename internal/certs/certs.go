@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	caCN = "MEB Intercept CA"
-	org  = "MEB"
+	caCN = "AURA Intercept CA"
+	org  = "AURA"
 )
 
 var leafMu sync.Mutex

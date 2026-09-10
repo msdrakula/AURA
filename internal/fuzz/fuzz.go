@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/time/rate"
@@ -31,16 +32,17 @@ type Hit struct {
 
 // Options configure a FUZZ run.
 type Options struct {
-	URL      string
-	Method   string
-	Headers  map[string]string
-	Body     string
-	Wordlist []string
-	Workers  int
-	RPS      int
-	Timeout  time.Duration
-	Hide     []int
-	OnHit    func(Hit)
+	URL        string
+	Method     string
+	Headers    map[string]string
+	Body       string
+	Wordlist   []string
+	Workers    int
+	RPS        int
+	Timeout    time.Duration
+	Hide       []int
+	OnHit      func(Hit)
+	OnProgress func(done, total int, hit Hit)
 }
 
 // Run replaces FUZZ in URL, headers, and body with each wordlist entry.
@@ -84,6 +86,8 @@ func Run(ctx context.Context, opts Options) ([]Hit, error) {
 	tasks := make(chan string)
 	var mu sync.Mutex
 	hits := make([]Hit, 0, 32)
+	var tried atomic.Int32
+	total := len(opts.Wordlist)
 	var wg sync.WaitGroup
 	for i := 0; i < opts.Workers; i++ {
 		wg.Add(1)
@@ -94,6 +98,10 @@ func Run(ctx context.Context, opts Options) ([]Hit, error) {
 					return
 				}
 				hit := probe(ctx, client, opts, word)
+				n := int(tried.Add(1))
+				if opts.OnProgress != nil {
+					opts.OnProgress(n, total, hit)
+				}
 				if _, skip := hide[hit.StatusCode]; skip && hit.Error == "" {
 					continue
 				}
@@ -143,7 +151,7 @@ func probe(ctx context.Context, client *http.Client, opts Options, word string) 
 		req.Header.Set(strings.ReplaceAll(k, "FUZZ", word), strings.ReplaceAll(v, "FUZZ", word))
 	}
 	if req.Header.Get("User-Agent") == "" {
-		req.Header.Set("User-Agent", "MEB-fuzz/1.0")
+		req.Header.Set("User-Agent", "AURA-fuzz/1.0")
 	}
 	resp, err := client.Do(req)
 	dur := time.Since(start)

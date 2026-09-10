@@ -2,6 +2,7 @@ package intel
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -89,12 +90,28 @@ func (m *memStore) ListArtifacts(targetID string) ([]Artifact, error) {
 
 func TestNormalizeInput(t *testing.T) {
 	d, b, err := NormalizeInput("Example.COM")
-	if err != nil || d != "example.com" || b != "https://example.com" {
+	if err != nil || d != "example.com" || b != "https://example.com/" {
 		t.Fatalf("got %q %q %v", d, b, err)
 	}
 	d, b, err = NormalizeInput("https://app.lab.local/v1")
 	if err != nil || d != "app.lab.local" || !strings.Contains(b, "/v1") {
 		t.Fatalf("got %q %q %v", d, b, err)
+	}
+	d, b, err = NormalizeInput("http://62.173.140.174:16126/")
+	if err != nil || d != "62.173.140.174" || b != "http://62.173.140.174:16126/" {
+		t.Fatalf("port kept: %q %q %v", d, b, err)
+	}
+	d, b, err = NormalizeInput("https://app.lab.local:443/api")
+	if err != nil || d != "app.lab.local" || b != "https://app.lab.local/api" {
+		t.Fatalf("default https port omitted: %q %q %v", d, b, err)
+	}
+	d, b, err = NormalizeInput("http://app.lab.local")
+	if err != nil || b != "http://app.lab.local/" {
+		t.Fatalf("http default: %q %q %v", d, b, err)
+	}
+	d, b, err = NormalizeInput("10.0.0.8:8080")
+	if err != nil || d != "10.0.0.8" || b != "http://10.0.0.8:8080/" {
+		t.Fatalf("bare host:port: %q %q %v", d, b, err)
 	}
 }
 
@@ -189,5 +206,98 @@ func TestWebPortsUsesDial(t *testing.T) {
 	}
 	if res.Added < 1 {
 		t.Fatalf("ports added=%d", res.Added)
+	}
+}
+
+type blockingTransport struct{}
+
+func (blockingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	<-req.Context().Done()
+	return nil, req.Context().Err()
+}
+
+func TestRunStageCancelResetsIdle(t *testing.T) {
+	st := newMem()
+	eng := &Engine{
+		Store: st,
+		HTTP:  &http.Client{Transport: blockingTransport{}},
+	}
+	tg, err := eng.EnsureTarget("https://lab.local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	resCh := make(chan RunResult, 1)
+	go func() {
+		res, err := eng.RunStage(ctx, tg.ID, "live_hosts")
+		resCh <- res
+		errCh <- err
+	}()
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err=%v", err)
+		}
+		res := <-resCh
+		if res.Stage.Status != StatusIdle {
+			t.Fatalf("status=%s summary=%s", res.Stage.Status, res.Stage.Summary)
+		}
+	case <-time.After(2 * time.Second):
+		cancel()
+		t.Fatal("RunStage did not return after cancel")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestProgressEventsOnWayback(t *testing.T) {
+	st := newMem()
+	var mu sync.Mutex
+	var got []ProgressEvent
+	eng := &Engine{
+		Store: st,
+		HTTP: &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+			body := `[["original"],["https://lab.local/old"]]`
+			return &http.Response{
+				StatusCode: 200,
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+				Request:    r,
+			}, nil
+		})},
+		Progress: func(ev ProgressEvent) {
+			mu.Lock()
+			got = append(got, ev)
+			mu.Unlock()
+		},
+	}
+	tg, err := eng.EnsureTarget("https://lab.local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := eng.RunStage(context.Background(), tg.ID, "urls_passive"); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	actions := map[string]bool{}
+	for _, ev := range got {
+		if ev.Stage != "urls_passive" {
+			continue
+		}
+		actions[ev.Action] = true
+		if ev.Action == "get" && !strings.Contains(ev.URL, "web.archive.org") {
+			t.Fatalf("get url = %q", ev.URL)
+		}
+	}
+	for _, want := range []string{"start", "get", "ok", "done"} {
+		if !actions[want] {
+			t.Fatalf("missing action %s in %+v", want, got)
+		}
 	}
 }

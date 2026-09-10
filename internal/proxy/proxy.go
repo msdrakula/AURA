@@ -240,7 +240,7 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 
 func (s *Server) handleHTTPS(ctx context.Context, connect *httpio.Request, conn net.Conn, br *bufio.Reader, client string) {
 	host, port := httpio.ParseAuthority(connect.Path, 443)
-	if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\nProxy-Agent: MEB\r\n\r\n")); err != nil {
+	if _, err := conn.Write([]byte("HTTP/1.1 200 Connection Established\r\nProxy-Agent: AURA\r\n\r\n")); err != nil {
 		return
 	}
 	leaf, err := s.certs.Leaf(host)

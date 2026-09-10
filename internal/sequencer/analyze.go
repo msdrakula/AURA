@@ -6,7 +6,7 @@ import (
 	"unicode/utf8"
 )
 
-// Analyze runs the full Sequencer analysis over a sample of tokens.
+// Analyze runs token entropy and frequency tests over a sample.
 func Analyze(tokens []string) Report {
 	clean := make([]string, 0, len(tokens))
 	for _, t := range tokens {

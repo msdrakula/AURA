@@ -78,5 +78,5 @@ func findBrowser() (string, []string, error) {
 }
 
 func freshProfileDir() string {
-	return "/tmp/meb-browser-profile"
+	return "/tmp/aura-browser-profile"
 }

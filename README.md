@@ -1,6 +1,11 @@
-# MEB
+# AURA
 
-Локальный прокси и карта цели: разведка по шагам, history, intercept, repeater, fuzz.
+**AURA** — Advanced URL and Request Analyzer  
+**AURA** — Продвинутый анализатор URL и запросов
+
+Локальный прокси и карта цели: разведка по шагам, history, intercept, повтор запроса, fuzz.
+
+Независимый проект. Не связан с PortSwigger / Burp Suite — см. [LEGAL.md](LEGAL.md).
 
 Только **свой** трафик и лабораторные стенды. Активные шаги (перебор путей, DNS, порты) включаются после явной галочки «это моя цель».
 
@@ -9,8 +14,8 @@
 Нужен [Go](https://go.dev/dl/) 1.22+.
 
 ```bash
-go build -o meb ./cmd/server
-./meb
+go build -o aura ./cmd/server
+./aura
 ```
 
 - UI: http://127.0.0.1:1337 — вкладка **Карта**
@@ -18,20 +23,18 @@ go build -o meb ./cmd/server
 - Callback: `127.0.0.1:8082`
 
 ```bash
-./meb --api-port 1337 --proxy-host 127.0.0.1 --proxy-port 8080 --db-path meb.db --ca-dir data
+./aura --api-port 1337 --proxy-host 127.0.0.1 --proxy-port 8080 --db-path aura.db --ca-dir data
 ```
+
+Если рядом ещё есть старый `meb.db`, он подхватится автоматически, пока не появится `aura.db`.
 
 ## Как устроен экран
 
-Пять вкладок, по майндмапу, не по Burp:
-
 1. **Карта** — цель, шаги разведки, дерево приложения.
 2. **Прокси** — перехват и история трафика.
-3. **Перебор** — пути (gobuster), Fuzz (`FUZZ` как ffuf), Intruder.
-4. **Запрос** — один HTTP-запрос (Repeater).
-5. **Ещё** — Decoder, Comparer и остальное для тех, кто пришёл из Burp.
-
-Обзора больше нет: цифры живут на Карте.
+3. **Пути / Фаззинг / Пакеты** — перебор путей, подстановка `FUZZ`, пакетная подстановка в шаблон.
+4. **Повтор** — один HTTP-запрос туда-обратно.
+5. Остальное — декодер, diff, анализ токенов, колбэк, сохранённые запросы.
 
 ## Как собрать карту
 
@@ -44,21 +47,23 @@ go build -o meb ./cmd/server
 
 ## Словари SecLists
 
-Все текстовые словари из [SecLists](https://github.com/danielmiessler/SecLists) (MIT) индексируются при старте из `third_party/SecLists`. В Переборе есть поиск по полному каталогу: выбираете файл, MEB читает его с диска (не через браузер). Карта на шагах «пути / параметры / DNS» берёт `common.txt`, `burp-parameter-names.txt` и `subdomains-top1million-5000.txt`, если они есть.
+Все текстовые словари из [SecLists](https://github.com/danielmiessler/SecLists) (MIT) индексируются при старте из `third_party/SecLists`. В Переборе есть поиск по полному каталогу: выбираете файл, AURA читает его с диска (не через браузер). Карта на шагах «пути / параметры / DNS» берёт стандартные словари директорий, имён параметров и поддоменов, если они есть в SecLists.
 
 ```bash
 git clone --depth 1 https://github.com/danielmiessler/SecLists.git third_party/SecLists
 ```
 
-- **Discover** — словари директорий (аналог gobuster dir).
-- **Fuzz** — подстановка `FUZZ` в URL (аналог ffuf). Словари путей и параметров встроены, короткие.
+- **Discover** — словари директорий (как gobuster dir).
+- **Fuzz** — подстановка `FUZZ` в URL (как ffuf). Словари путей и параметров встроены, короткие.
 
 ## HTTPS
 
-1. Скачайте CA с вкладки Proxy.
-2. Добавьте `meb-ca.crt` в доверенные центры.
+1. Скачайте CA с вкладки Proxy (`aura-ca.crt`).
+2. Добавьте сертификат в доверенные центры.
 3. Укажите HTTP-прокси `127.0.0.1:8080`.
+
+Если раньше был импортирован старый CA, импортируйте новый **AURA Intercept CA**.
 
 ## Ещё
 
-HTTP/1.1 MITM, intercept, repeater, decoder, sequencer, organizer. Прокси без HTTP/2.
+HTTP/1.1 MITM, intercept, replay, decoder, token analysis, saved items. Прокси без HTTP/2.
