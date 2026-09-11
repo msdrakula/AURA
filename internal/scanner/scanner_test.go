@@ -113,6 +113,15 @@ func TestSQLErrorLiteralDotStar(t *testing.T) {
 	t.Fatal("sqlErrors changed; update audit note")
 }
 
+func TestScanHonorsCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := Scan(ctx, Options{Raw: "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n", Scheme: "http", Target: "127.0.0.1:1", Timeout: time.Second})
+	if err == nil {
+		t.Fatal("cancelled context should stop the scan")
+	}
+}
+
 func ExampleScan_requiresRaw() {
 	fmt.Println("scanner API rejects empty raw; UI synthesizes GET / from Target")
 	// Output: scanner API rejects empty raw; UI synthesizes GET / from Target

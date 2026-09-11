@@ -61,11 +61,69 @@ func TestToolbarFieldsNotSquares(t *testing.T) {
 	if bad.MatchString(css) {
 		t.Fatal("`.toolbar input, .toolbar select { flex: 1 … }` stretches Mode/Scheme/Target into squares; keep the rule on `.toolbar > input` only and reset nested label controls")
 	}
-	if !strings.Contains(css, ".toolbar > label input") {
-		t.Fatal("missing `.toolbar > label input` height lock")
+	if !strings.Contains(css, ".toolbar > label input:not([type=\"checkbox\"])") {
+		t.Fatal("toolbar nested text inputs must lock height; checkboxes must be excluded")
 	}
-	if !strings.Contains(css, "flex: 0 0 auto") {
-		t.Fatal("toolbar nested inputs must be flex: 0 0 auto")
+	if !strings.Contains(css, ".toolbar > .tb-mode") {
+		t.Fatal("Payloads Mode must use .tb-mode so RU «Все сочетания» is not clipped")
+	}
+	if !strings.Contains(css, "select:not([multiple]):not([size])") || !strings.Contains(css, "-webkit-appearance: none") {
+		t.Fatal("compact selects need appearance:none — GTK native chevron overlays the value")
+	}
+	if !strings.Contains(css, "min-width: 22em") {
+		t.Fatal("tb-mode must stay wide enough for «По одной позиции» / «Все сочетания»")
+	}
+	if !strings.Contains(readWeb(t, "index.html"), `class="tb-field tb-mode"`) {
+		t.Fatal("intrAttackType label needs tb-mode")
+	}
+}
+
+func TestNavTabsReorderAndLock(t *testing.T) {
+	js := readWeb(t, "static/app.js")
+	html := readWeb(t, "index.html")
+	i18n := readWeb(t, "static/i18n.js")
+	css := readWeb(t, "static/app.css")
+	for _, needle := range []string{"NavTabs", "tabOrder", "uiLocked", "startDrag", "set.lockUi"} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("nav reorder/lock missing %s", needle)
+		}
+	}
+	if !strings.Contains(html, `id="btnLockUi"`) {
+		t.Fatal("settings must have Lock interface button")
+	}
+	if !strings.Contains(css, `html[data-ui-locked="1"]`) {
+		t.Fatal("locked interface must disable tab grab and pane gutters")
+	}
+	if !strings.Contains(i18n, `"set.lockUi"`) || !strings.Contains(i18n, `"set.unlockUi"`) {
+		t.Fatal("lock/unlock i18n keys missing")
+	}
+}
+
+func TestReplayAndPayloadsNewTabSameSide(t *testing.T) {
+	css := readWeb(t, "static/app.css")
+	html := readWeb(t, "index.html")
+	if !strings.Contains(css, ".intr-tabs, .rep-tabs") {
+		t.Fatal("Payloads and Replay tab strips must share the same flex rules")
+	}
+	if !strings.Contains(css, "order: -1") || !strings.Contains(css, "margin-left: 0") {
+		t.Fatal("+ new-tab must sit on the left of the tab strip in Payloads and Replay")
+	}
+	if !strings.Contains(html, `id="btnIntrNewTab"`) || !strings.Contains(html, `id="btnRepNewTab"`) {
+		t.Fatal("missing new-tab buttons")
+	}
+}
+
+func TestCheckboxesNotSquares(t *testing.T) {
+	css := readWeb(t, "static/app.css")
+	js := readWeb(t, "static/app.js")
+	if !strings.Contains(css, `input[type="checkbox"]`) {
+		t.Fatal("missing checkbox size lock")
+	}
+	if !strings.Contains(css, "max-width: 15px") {
+		t.Fatal("checkboxes must stay 15px, not stretch to 100% of the label")
+	}
+	if strings.Contains(js, `p.style.overflow = "hidden"`) {
+		t.Fatal("UILayout.applySplit must not force overflow:hidden on panes — Discover/Scanner forms need a vertical scrollbar")
 	}
 }
 
@@ -79,6 +137,40 @@ func TestScannerSynthesizesGETFromTarget(t *testing.T) {
 	}
 	if !strings.Contains(html, `id="scanRaw"`) || !strings.Contains(html, `id="scanTarget"`) {
 		t.Fatal("scanner form missing scanRaw/scanTarget")
+	}
+}
+
+func TestMapModulesAndNav(t *testing.T) {
+	html := readWeb(t, "index.html")
+	js := readWeb(t, "static/app.js")
+	if !strings.Contains(html, `data-view="scope"`) || !strings.Contains(html, `data-view="other"`) {
+		t.Fatal("Scope and Other must be main tabs")
+	}
+	if strings.Contains(html, `data-view="target"`) {
+		t.Fatal("Target is no longer a main tab — the map lives on Map")
+	}
+	if !strings.Contains(html, `id="view-scope"`) || !strings.Contains(html, `id="view-other"`) {
+		t.Fatal("missing #view-scope / #view-other")
+	}
+	if !strings.Contains(html, `id="mapSubtabs"`) || !strings.Contains(html, `data-sub="sitemap"`) || !strings.Contains(html, `data-sub="subdomains_passive"`) {
+		t.Fatal("Map must nest Site map and modules like Proxy subtabs")
+	}
+	if strings.Contains(html, `id="otherSubtabs"`) || strings.Contains(html, `data-i18n="other.sitemap"`) {
+		t.Fatal("Site map belongs on Map, not Other")
+	}
+	if !strings.Contains(html, `id="siteTree"`) || !strings.Contains(html, `data-subpane="sitemap"`) {
+		t.Fatal("Site map tree must live in the first Map subtab")
+	}
+	if !strings.Contains(html, `class="map-stage-page" data-stage="dirs"`) {
+		t.Fatal("each Map module needs its own subpane")
+	}
+	for _, needle := range []string{"mapStageFields", "collectMapOpts", "readStageForm", "timeout_sec", "same_host", "mergeIntelIntoSiteTree"} {
+		if !strings.Contains(js, needle) {
+			t.Errorf("map module settings missing %s", needle)
+		}
+	}
+	if !strings.Contains(js, "JSON.stringify(opts)") {
+		t.Fatal("Run must POST per-module options")
 	}
 }
 
@@ -145,6 +237,37 @@ func TestScanNeedKeyPresent(t *testing.T) {
 	}
 	if _, ok := en["scan.usingGet"]; !ok {
 		t.Fatal("scan.usingGet missing")
+	}
+}
+
+func TestNoBrowserAlertDialogs(t *testing.T) {
+	js := readWeb(t, "static/app.js")
+	if strings.Contains(js, "alert(") {
+		t.Fatal("app.js must not call alert(); GTK shows a blocking JavaScript dialog")
+	}
+	if !strings.Contains(js, "function uiFlash") {
+		t.Fatal("missing uiFlash for inline errors")
+	}
+}
+
+func TestExtensionsStubHidden(t *testing.T) {
+	html := readWeb(t, "index.html")
+	js := readWeb(t, "static/app.js")
+	if !strings.Contains(html, `data-view="extensions"`) || !strings.Contains(html, "ext.unavailable") {
+		t.Fatal("extensions tab should remain in DOM but show unavailable copy")
+	}
+	if strings.Contains(js, "btnExtLoad") {
+		t.Fatal("fake extension loader must not remain")
+	}
+	if !strings.Contains(js, `name === "extensions"`) {
+		t.Fatal("showView must skip the extensions stub")
+	}
+}
+
+func TestOriginGuardPresent(t *testing.T) {
+	src := readRepo(t, "internal/api/origin.go")
+	if !strings.Contains(src, "origin not allowed") || !strings.Contains(src, "Sec-Fetch-Site") {
+		t.Fatal("API origin guard missing")
 	}
 }
 

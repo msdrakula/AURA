@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -135,11 +136,15 @@ func (e *Engine) Snapshot(id string) (Target, []StageState, []Artifact, AppMap, 
 	return t, stages, arts, BuildMap(t, arts), nil
 }
 
-// RunStage executes one mindmap step.
-func (e *Engine) RunStage(ctx context.Context, targetID, stageID string) (RunResult, error) {
+// RunStage executes one mindmap step. Optional StageOptions override defaults for that module.
+func (e *Engine) RunStage(ctx context.Context, targetID, stageID string, opts ...StageOptions) (RunResult, error) {
 	cat, ok := stageByID(stageID)
 	if !ok {
 		return RunResult{}, fmt.Errorf("unknown stage %q", stageID)
+	}
+	var opt StageOptions
+	if len(opts) > 0 {
+		opt = opts[0]
 	}
 	t, err := e.Store.GetTarget(targetID)
 	if err != nil {
@@ -163,23 +168,23 @@ func (e *Engine) RunStage(ctx context.Context, targetID, stageID string) (RunRes
 	var runErr error
 	switch stageID {
 	case "subdomains_passive":
-		added, runErr = e.crtsh(ctx, t)
+		added, runErr = e.crtsh(ctx, t, opt)
 	case "dns_brute":
-		added, runErr = e.dnsBrute(ctx, t)
+		added, runErr = e.dnsBrute(ctx, t, opt)
 	case "live_hosts":
-		added, runErr = e.liveHosts(ctx, t, arts)
+		added, runErr = e.liveHosts(ctx, t, arts, opt)
 	case "web_ports":
-		added, runErr = e.webPorts(ctx, t, arts)
+		added, runErr = e.webPorts(ctx, t, arts, opt)
 	case "tech":
-		added, runErr = e.tech(ctx, t, arts)
+		added, runErr = e.tech(ctx, t, arts, opt)
 	case "urls_passive":
-		added, runErr = e.wayback(ctx, t)
+		added, runErr = e.wayback(ctx, t, opt)
 	case "scrape":
-		added, runErr = e.scrape(ctx, t)
+		added, runErr = e.scrape(ctx, t, opt)
 	case "dirs":
-		added, runErr = e.dirs(ctx, t)
+		added, runErr = e.dirs(ctx, t, opt)
 	case "params":
-		added, runErr = e.params(ctx, t)
+		added, runErr = e.params(ctx, t, opt)
 	default:
 		runErr = fmt.Errorf("stage not implemented")
 	}
@@ -242,11 +247,14 @@ func (e *Engine) IngestHistory(targetID string, urls []string) (int, error) {
 			{TargetID: t.ID, Kind: KindHost, Value: host, Source: "proxy"},
 			{TargetID: t.ID, Kind: KindURL, Value: strings.TrimRight(raw, "#"), Source: "proxy"},
 		}
-		if u.Path != "" {
+		if u.Path != "" && IsSanePath(u.Path) {
 			items = append(items, Artifact{TargetID: t.ID, Kind: KindPath, Value: u.Path, Source: "proxy", Extra: map[string]string{"host": host}})
 		}
 		for key := range u.Query() {
-			items = append(items, Artifact{TargetID: t.ID, Kind: KindParam, Value: key, Source: "proxy"})
+			if IsTrackingParam(key) {
+				continue
+			}
+			items = append(items, Artifact{TargetID: t.ID, Kind: KindParam, Value: key, Source: "proxy", Extra: map[string]string{"host": host, "path": u.Path}})
 		}
 		for _, a := range items {
 			if err := e.Store.AddArtifact(a); err == nil {
@@ -257,16 +265,17 @@ func (e *Engine) IngestHistory(targetID string, urls []string) (int, error) {
 	return n, nil
 }
 
-func (e *Engine) crtsh(ctx context.Context, t Target) ([]Artifact, error) {
+func (e *Engine) crtsh(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
 	q := url.QueryEscape("%." + t.Domain)
 	raw := "https://crt.sh/?q=" + q + "&output=json"
-	e.emit(ProgressEvent{Stage: "subdomains_passive", Action: "get", URL: raw, Host: "crt.sh", Timeout: 30})
+	sec := opt.timeout(45)
+	e.emit(ProgressEvent{Stage: "subdomains_passive", Action: "get", URL: raw, Host: "crt.sh", Timeout: sec})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "AURA-intel/1.0")
-	resp, err := e.httpWithTimeout(30 * time.Second).Do(req)
+	resp, err := e.httpWithTimeout(time.Duration(sec) * time.Second).Do(req)
 	if err != nil {
 		e.emit(ProgressEvent{Stage: "subdomains_passive", Action: "err", Host: "crt.sh", URL: raw, Err: err.Error()})
 		return nil, fmt.Errorf("crt.sh: %w", err)
@@ -281,6 +290,10 @@ func (e *Engine) crtsh(ctx context.Context, t Target) ([]Artifact, error) {
 		return nil, fmt.Errorf("crt.sh: HTTP %d", resp.StatusCode)
 	}
 	names := parseCRTNames(body, t.Domain)
+	max := opt.limit(400, 2000)
+	if len(names) > max {
+		names = names[:max]
+	}
 	e.emit(ProgressEvent{Stage: "subdomains_passive", Action: "ok", Host: "crt.sh", Status: resp.StatusCode, N: len(names)})
 	var out []Artifact
 	for _, name := range names {
@@ -289,7 +302,7 @@ func (e *Engine) crtsh(ctx context.Context, t Target) ([]Artifact, error) {
 	return out, nil
 }
 
-func (e *Engine) dnsBrute(ctx context.Context, t Target) ([]Artifact, error) {
+func (e *Engine) dnsBrute(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
 	lookup := e.Lookup
 	if lookup == nil {
 		lookup = func(ctx context.Context, host string) ([]string, error) {
@@ -297,35 +310,83 @@ func (e *Engine) dnsBrute(ctx context.Context, t Target) ([]Artifact, error) {
 			return d.LookupHost(ctx, host)
 		}
 	}
-	words := e.Lists.LoadFirst(wordlist.HostPrefixes(), wordlist.DefaultDNS...)
+	words := e.stageWords(opt, wordlist.HostPrefixes(), wordlist.DefaultDNS...)
+	max := opt.limit(len(words), 20000)
+	if max < len(words) {
+		words = words[:max]
+	}
+	workers := opt.workers(32)
+	if workers > 128 {
+		workers = 128
+	}
+	if workers > len(words) {
+		workers = len(words)
+	}
+	if workers < 1 {
+		workers = 1
+	}
+	sec := opt.timeout(5)
+	type hit struct {
+		host string
+		ip   string
+		i    int
+	}
+	jobs := make(chan int)
+	hits := make(chan hit, workers)
+	var wg sync.WaitGroup
+	for w := 0; w < workers; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range jobs {
+				if err := ctx.Err(); err != nil {
+					return
+				}
+				host := words[i] + "." + t.Domain
+				lctx, cancel := context.WithTimeout(ctx, time.Duration(sec)*time.Second)
+				addrs, err := lookup(lctx, host)
+				cancel()
+				if err != nil || len(addrs) == 0 {
+					e.emitTick("dns_brute", i+1, len(words), 25, ProgressEvent{Host: host})
+					continue
+				}
+				hits <- hit{host: host, ip: addrs[0], i: i}
+			}
+		}()
+	}
+	go func() {
+		defer close(jobs)
+		for i := range words {
+			select {
+			case <-ctx.Done():
+				return
+			case jobs <- i:
+			}
+		}
+	}()
+	go func() {
+		wg.Wait()
+		close(hits)
+	}()
 	var out []Artifact
-	for i, p := range words {
-		if err := ctx.Err(); err != nil {
-			return out, err
-		}
-		host := p + "." + t.Domain
-		addrs, err := lookup(ctx, host)
-		if err != nil || len(addrs) == 0 {
-			e.emitTick("dns_brute", i+1, len(words), 25, ProgressEvent{Host: host})
-			continue
-		}
+	for h := range hits {
 		out = append(out, Artifact{
 			Kind:   KindSubdomain,
-			Value:  host,
+			Value:  h.host,
 			Source: "dns",
-			Extra:  map[string]string{"ip": addrs[0]},
+			Extra:  map[string]string{"ip": h.ip},
 		})
-		e.emit(ProgressEvent{Stage: "dns_brute", Action: "hit", Host: host, Value: addrs[0], N: i + 1, Total: len(words)})
+		e.emit(ProgressEvent{Stage: "dns_brute", Action: "hit", Host: h.host, Value: h.ip, N: h.i + 1, Total: len(words)})
 	}
-	return out, nil
+	return out, ctx.Err()
 }
 
-func (e *Engine) liveHosts(ctx context.Context, t Target, arts []Artifact) ([]Artifact, error) {
+func (e *Engine) liveHosts(ctx context.Context, t Target, arts []Artifact, opt StageOptions) ([]Artifact, error) {
 	seen := map[string]struct{}{}
 	var out []Artifact
 	add := func(host string, extra map[string]string) {
 		host = strings.ToLower(strings.TrimSpace(host))
-		if host == "" {
+		if host == "" || !SameScope(host, t.Domain) {
 			return
 		}
 		if _, ok := seen[host]; ok {
@@ -334,9 +395,14 @@ func (e *Engine) liveHosts(ctx context.Context, t Target, arts []Artifact) ([]Ar
 		seen[host] = struct{}{}
 		out = append(out, Artifact{Kind: KindHost, Value: host, Source: "live", Extra: extra})
 	}
+	sec := opt.timeout(8)
+	schemes := opt.Schemes
+	if len(schemes) == 0 {
+		schemes = []string{"https", "http"}
+	}
 	if t.BaseURL != "" {
-		e.emit(ProgressEvent{Stage: "live_hosts", Action: "get", URL: t.BaseURL, Timeout: 12})
-		if live, extra := e.probeURL(ctx, t.BaseURL); live {
+		e.emit(ProgressEvent{Stage: "live_hosts", Action: "get", URL: t.BaseURL, Timeout: sec})
+		if live, extra := e.probeURLFast(ctx, t.BaseURL, time.Duration(sec)*time.Second); live {
 			if u, err := url.Parse(t.BaseURL); err == nil {
 				add(u.Hostname(), extra)
 				e.emit(ProgressEvent{Stage: "live_hosts", Action: "hit", URL: t.BaseURL, Host: u.Hostname(), Status: atoi(extra["status"])})
@@ -346,7 +412,9 @@ func (e *Engine) liveHosts(ctx context.Context, t Target, arts []Artifact) ([]Ar
 	hosts := []string{t.Domain}
 	for _, a := range arts {
 		if a.Kind == KindSubdomain || a.Kind == KindHost {
-			hosts = append(hosts, a.Value)
+			if SameScope(a.Value, t.Domain) {
+				hosts = append(hosts, a.Value)
+			}
 		}
 	}
 	for _, h := range hosts {
@@ -356,8 +424,8 @@ func (e *Engine) liveHosts(ctx context.Context, t Target, arts []Artifact) ([]Ar
 		if _, ok := seen[strings.ToLower(h)]; ok {
 			continue
 		}
-		e.emit(ProgressEvent{Stage: "live_hosts", Action: "get", Host: h, Timeout: 12})
-		live, extra := e.probeHost(ctx, h, t.BaseURL)
+		e.emit(ProgressEvent{Stage: "live_hosts", Action: "get", Host: h, Timeout: sec})
+		live, extra := e.probeHostSchemes(ctx, h, t.BaseURL, schemes, time.Duration(sec)*time.Second)
 		if live {
 			add(h, extra)
 			e.emit(ProgressEvent{Stage: "live_hosts", Action: "hit", Host: h, Status: atoi(extra["status"])})
@@ -394,42 +462,67 @@ func (e *Engine) probeURL(ctx context.Context, raw string) (bool, map[string]str
 }
 
 func (e *Engine) probeHost(ctx context.Context, host string, bases ...string) (bool, map[string]string) {
+	return e.probeHostSchemes(ctx, host, firstString(bases), []string{"https", "http"}, 8*time.Second)
+}
+
+func firstString(ss []string) string {
+	if len(ss) == 0 {
+		return ""
+	}
+	return ss[0]
+}
+
+func (e *Engine) probeHostSchemes(ctx context.Context, host, base string, schemes []string, d time.Duration) (bool, map[string]string) {
 	host = strings.ToLower(strings.TrimSpace(host))
 	var candidates []string
-	for _, b := range bases {
-		if origin := OriginURL(b); origin != "" {
-			u, err := url.Parse(origin)
-			if err == nil && strings.EqualFold(u.Hostname(), host) {
-				candidates = append(candidates, strings.TrimRight(origin, "/")+"/")
-			}
+	if origin := OriginURL(base); origin != "" {
+		u, err := url.Parse(origin)
+		if err == nil && strings.EqualFold(u.Hostname(), host) {
+			candidates = append(candidates, strings.TrimRight(origin, "/")+"/")
 		}
 	}
-	candidates = append(candidates, "https://"+host+"/", "http://"+host+"/")
+	want := map[string]bool{}
+	for _, s := range schemes {
+		want[strings.ToLower(strings.TrimSpace(s))] = true
+	}
+	if want["https"] {
+		candidates = append(candidates, "https://"+host+"/")
+	}
+	if want["http"] {
+		candidates = append(candidates, "http://"+host+"/")
+	}
+	if len(candidates) == 0 {
+		candidates = []string{"https://" + host + "/", "http://" + host + "/"}
+	}
 	seen := map[string]struct{}{}
 	for _, raw := range candidates {
 		if _, ok := seen[raw]; ok {
 			continue
 		}
 		seen[raw] = struct{}{}
-		if ok, extra := e.probeURL(ctx, raw); ok {
+		if ok, extra := e.probeURLFast(ctx, raw, d); ok {
 			return true, extra
 		}
 	}
 	return false, nil
 }
 
-func (e *Engine) webPorts(ctx context.Context, t Target, arts []Artifact) ([]Artifact, error) {
+func (e *Engine) webPorts(ctx context.Context, t Target, arts []Artifact, opt StageOptions) ([]Artifact, error) {
 	dial := e.Dial
 	if dial == nil {
 		d := net.Dialer{Timeout: 2 * time.Second}
 		dial = d.DialContext
 	}
 	hosts := liveOrSeed(t, arts)
-	ports := []string{"80", "443", "8080", "8443", "3000", "8000", "8008", "8888"}
+	ports := webPortList(t.BaseURL, opt.Ports)
 	total := len(hosts) * len(ports)
+	sec := opt.timeout(3)
 	var out []Artifact
 	n := 0
 	for _, h := range hosts {
+		if !SameScope(h, t.Domain) {
+			continue
+		}
 		for _, p := range ports {
 			if err := ctx.Err(); err != nil {
 				return out, err
@@ -442,29 +535,90 @@ func (e *Engine) webPorts(ctx context.Context, t Target, arts []Artifact) ([]Art
 				continue
 			}
 			_ = c.Close()
+			live, extra := e.probeWebPort(ctx, h, p, t.BaseURL, time.Duration(sec)*time.Second)
+			if !live {
+				e.emitTick("web_ports", n, total, 16, ProgressEvent{Host: addr, Msg: "tcp"})
+				continue
+			}
+			if extra == nil {
+				extra = map[string]string{}
+			}
+			extra["host"] = h
+			extra["port"] = p
 			out = append(out, Artifact{
 				Kind:   KindPort,
 				Value:  h + ":" + p,
 				Source: "ports",
-				Extra:  map[string]string{"host": h, "port": p},
+				Extra:  extra,
 			})
-			e.emit(ProgressEvent{Stage: "web_ports", Action: "hit", Host: addr, Value: addr, N: n, Total: total})
+			e.emit(ProgressEvent{Stage: "web_ports", Action: "hit", Host: addr, Value: addr, URL: extra["url"], Status: atoi(extra["status"]), N: n, Total: total})
 		}
 	}
 	return out, nil
 }
 
-func (e *Engine) tech(ctx context.Context, t Target, arts []Artifact) ([]Artifact, error) {
+func (e *Engine) probeWebPort(ctx context.Context, host, port, base string, d ...time.Duration) (bool, map[string]string) {
+	wait := 3 * time.Second
+	if len(d) > 0 && d[0] > 0 {
+		wait = d[0]
+	}
+	for _, raw := range webProbeURLs(host, port, base) {
+		ok, extra := e.probeURLFast(ctx, raw, wait)
+		if ok {
+			if extra == nil {
+				extra = map[string]string{}
+			}
+			extra["url"] = raw
+			return true, extra
+		}
+	}
+	return false, nil
+}
+
+func (e *Engine) probeURLFast(ctx context.Context, raw string, d time.Duration) (bool, map[string]string) {
+	ctx, cancel := context.WithTimeout(ctx, d)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
+	if err != nil {
+		return false, nil
+	}
+	req.Header.Set("User-Agent", "AURA-intel/1.0")
+	resp, err := e.httpWithTimeout(d).Do(req)
+	if err != nil {
+		return false, nil
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64*1024))
+	_ = resp.Body.Close()
+	if resp.StatusCode == 0 {
+		return false, nil
+	}
+	u, _ := url.Parse(raw)
+	scheme := "https"
+	if u != nil && u.Scheme != "" {
+		scheme = u.Scheme
+	}
+	return true, map[string]string{
+		"scheme": scheme,
+		"status": fmt.Sprintf("%d", resp.StatusCode),
+		"server": resp.Header.Get("Server"),
+	}
+}
+
+func (e *Engine) tech(ctx context.Context, t Target, arts []Artifact, opt StageOptions) ([]Artifact, error) {
 	var out []Artifact
 	seen := map[string]struct{}{}
+	sec := opt.timeout(10)
 	fetch := func(raw, host string) {
-		e.emit(ProgressEvent{Stage: "tech", Action: "get", URL: raw, Host: host, Timeout: 12})
+		if !SameScope(host, t.Domain) {
+			return
+		}
+		e.emit(ProgressEvent{Stage: "tech", Action: "get", URL: raw, Host: host, Timeout: sec})
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, raw, nil)
 		if err != nil {
 			return
 		}
 		req.Header.Set("User-Agent", "AURA-intel/1.0")
-		resp, err := e.http().Do(req)
+		resp, err := e.httpWithTimeout(time.Duration(sec) * time.Second).Do(req)
 		if err != nil {
 			e.emit(ProgressEvent{Stage: "tech", Action: "err", URL: raw, Host: host, Err: err.Error()})
 			return
@@ -496,6 +650,9 @@ func (e *Engine) tech(ctx context.Context, t Target, arts []Artifact) ([]Artifac
 		fetch(t.BaseURL, host)
 	}
 	for _, h := range liveOrSeed(t, arts) {
+		if !SameScope(h, t.Domain) {
+			continue
+		}
 		scheme := "https"
 		for _, a := range arts {
 			if a.Kind == KindHost && a.Value == h && a.Extra["scheme"] == "http" {
@@ -512,15 +669,18 @@ func (e *Engine) tech(ctx context.Context, t Target, arts []Artifact) ([]Artifac
 	return out, nil
 }
 
-func (e *Engine) wayback(ctx context.Context, t Target) ([]Artifact, error) {
-	u := "https://web.archive.org/cdx/search/cdx?url=*." + url.QueryEscape(t.Domain) + "/*&output=json&fl=original&collapse=urlkey&limit=150"
-	e.emit(ProgressEvent{Stage: "urls_passive", Action: "get", URL: u, Host: "web.archive.org", Timeout: 45})
+func (e *Engine) wayback(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
+	limit := opt.limit(400, 2000)
+	match := "*." + t.Domain + "/*"
+	u := "https://web.archive.org/cdx/search/cdx?url=" + url.QueryEscape(match) + "&output=json&fl=original&collapse=urlkey&limit=" + strconv.Itoa(limit)
+	sec := opt.timeout(45)
+	e.emit(ProgressEvent{Stage: "urls_passive", Action: "get", URL: u, Host: "web.archive.org", Timeout: sec})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "AURA-intel/1.0")
-	resp, err := e.httpWithTimeout(45 * time.Second).Do(req)
+	resp, err := e.httpWithTimeout(time.Duration(sec) * time.Second).Do(req)
 	if err != nil {
 		e.emit(ProgressEvent{Stage: "urls_passive", Action: "err", Host: "web.archive.org", URL: u, Err: err.Error()})
 		return nil, fmt.Errorf("wayback: %w", err)
@@ -538,15 +698,29 @@ func (e *Engine) wayback(ctx context.Context, t Target) ([]Artifact, error) {
 	e.emit(ProgressEvent{Stage: "urls_passive", Action: "ok", Host: "web.archive.org", Status: resp.StatusCode, N: len(urls)})
 	var out []Artifact
 	for _, raw := range urls {
+		pu, err := url.Parse(raw)
+		if err != nil || pu.Hostname() == "" {
+			continue
+		}
+		if opt.sameHost() && !SameScope(pu.Hostname(), t.Domain) {
+			continue
+		}
+		path := pu.Path
+		if path == "" {
+			path = "/"
+		}
+		if !IsSanePath(path) {
+			continue
+		}
 		out = append(out, Artifact{Kind: KindURL, Value: raw, Source: "wayback"})
-		if pu, err := url.Parse(raw); err == nil && pu.Path != "" && pu.Path != "/" {
-			out = append(out, Artifact{Kind: KindPath, Value: pu.Path, Source: "wayback", Extra: map[string]string{"host": pu.Hostname()}})
+		if path != "/" {
+			out = append(out, Artifact{Kind: KindPath, Value: path, Source: "wayback", Extra: map[string]string{"host": pu.Hostname()}})
 		}
 	}
 	return out, nil
 }
 
-func (e *Engine) scrape(ctx context.Context, t Target) ([]Artifact, error) {
+func (e *Engine) scrape(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
 	base := t.BaseURL
 	if base == "" {
 		base = "https://" + t.Domain + "/"
@@ -555,13 +729,14 @@ func (e *Engine) scrape(ctx context.Context, t Target) ([]Artifact, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.emit(ProgressEvent{Stage: "scrape", Action: "get", URL: base, Timeout: 12})
+	sec := opt.timeout(12)
+	e.emit(ProgressEvent{Stage: "scrape", Action: "get", URL: base, Timeout: sec})
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "AURA-intel/1.0")
-	resp, err := e.http().Do(req)
+	resp, err := e.httpWithTimeout(time.Duration(sec) * time.Second).Do(req)
 	if err != nil {
 		e.emit(ProgressEvent{Stage: "scrape", Action: "err", URL: base, Err: err.Error()})
 		return nil, err
@@ -573,36 +748,57 @@ func (e *Engine) scrape(ctx context.Context, t Target) ([]Artifact, error) {
 		htmlRes = extractor.ExtractJS(bu, body)
 	}
 	e.emit(ProgressEvent{Stage: "scrape", Action: "ok", URL: base, Status: resp.StatusCode, N: len(htmlRes.URLs)})
+	keep := func(raw string) (*url.URL, bool) {
+		u, err := url.Parse(raw)
+		if err != nil || u.Hostname() == "" {
+			return nil, false
+		}
+		if opt.sameHost() && !SameScope(u.Hostname(), t.Domain) {
+			return nil, false
+		}
+		path := u.Path
+		if path == "" {
+			path = "/"
+		}
+		if !IsSanePath(path) {
+			return nil, false
+		}
+		return u, true
+	}
 	var out []Artifact
 	jsSeen := map[string]struct{}{}
 	for _, raw := range htmlRes.URLs {
-		out = append(out, Artifact{Kind: KindURL, Value: raw, Source: "scrape"})
-		u, err := url.Parse(raw)
-		if err != nil {
+		u, ok := keep(raw)
+		if !ok {
 			continue
 		}
+		out = append(out, Artifact{Kind: KindURL, Value: raw, Source: "scrape"})
 		if strings.HasSuffix(strings.ToLower(u.Path), ".js") {
 			out = append(out, Artifact{Kind: KindJS, Value: raw, Source: "scrape"})
 			jsSeen[raw] = struct{}{}
 		}
-		if u.Path != "" {
+		if u.Path != "" && IsSanePath(u.Path) {
 			out = append(out, Artifact{Kind: KindPath, Value: u.Path, Source: "scrape", Extra: map[string]string{"host": u.Hostname()}})
 		}
 	}
+	follow := opt.followJS(8)
+	if follow > 40 {
+		follow = 40
+	}
 	n := 0
 	jsTotal := len(jsSeen)
-	if jsTotal > 8 {
-		jsTotal = 8
+	if jsTotal > follow {
+		jsTotal = follow
 	}
 	for raw := range jsSeen {
 		if err := ctx.Err(); err != nil {
 			return out, err
 		}
-		if n >= 8 {
+		if n >= follow {
 			break
 		}
 		n++
-		e.emit(ProgressEvent{Stage: "scrape", Action: "get", URL: raw, N: n, Total: jsTotal, Timeout: 12})
+		e.emit(ProgressEvent{Stage: "scrape", Action: "get", URL: raw, N: n, Total: jsTotal, Timeout: sec})
 		ju, err := url.Parse(raw)
 		if err != nil {
 			continue
@@ -611,7 +807,7 @@ func (e *Engine) scrape(ctx context.Context, t Target) ([]Artifact, error) {
 		if err != nil {
 			continue
 		}
-		jresp, err := e.http().Do(jreq)
+		jresp, err := e.httpWithTimeout(time.Duration(sec) * time.Second).Do(jreq)
 		if err != nil {
 			e.emit(ProgressEvent{Stage: "scrape", Action: "err", URL: raw, Err: err.Error()})
 			continue
@@ -621,35 +817,56 @@ func (e *Engine) scrape(ctx context.Context, t Target) ([]Artifact, error) {
 		found := extractor.ExtractJS(ju, jsBody).URLs
 		e.emit(ProgressEvent{Stage: "scrape", Action: "ok", URL: raw, Status: jresp.StatusCode, N: len(found)})
 		for _, u := range found {
+			if _, ok := keep(u); !ok {
+				continue
+			}
 			out = append(out, Artifact{Kind: KindURL, Value: u, Source: "js"})
 		}
 	}
 	return out, nil
 }
 
-func (e *Engine) dirs(ctx context.Context, t Target) ([]Artifact, error) {
+func (e *Engine) dirs(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
 	base := t.BaseURL
 	if base == "" {
 		base = "https://" + t.Domain
 	}
-	words := e.Lists.LoadFirst(wordlist.Dirs(), wordlist.DefaultDirs...)
+	words := e.stageWords(opt, wordlist.Dirs(), wordlist.DefaultDirs...)
+	max := opt.limit(len(words), 20000)
+	if max < len(words) {
+		words = words[:max]
+	}
+	host := t.Domain
+	if u, err := url.Parse(base); err == nil && u.Hostname() != "" {
+		host = u.Hostname()
+	}
+	hide := opt.Hide
+	if len(hide) == 0 {
+		hide = []int{404}
+	}
+	hideSet := map[int]struct{}{}
+	for _, c := range hide {
+		hideSet[c] = struct{}{}
+	}
 	e.emit(ProgressEvent{Stage: "dirs", Action: "get", URL: base, Total: len(words)})
 	res, err := discover.Run(ctx, discover.Options{
 		BaseURL:  base,
 		Wordlist: words,
-		Workers:  8,
-		RPS:      12,
-		Timeout:  8 * time.Second,
+		Workers:  opt.workers(16),
+		RPS:      opt.rps(25),
+		Timeout:  time.Duration(opt.timeout(8)) * time.Second,
 		OnProgress: func(done, total int, r discover.Result) {
 			ev := ProgressEvent{URL: r.Path, Status: r.StatusCode, Err: r.Error}
-			if r.Error == "" && r.StatusCode != 0 && r.StatusCode != 404 {
-				ev.Action = "hit"
-				ev.Value = r.Path
-				ev.Stage = "dirs"
-				ev.N = done
-				ev.Total = total
-				e.emit(ev)
-				return
+			if r.Error == "" && r.StatusCode != 0 {
+				if _, skip := hideSet[r.StatusCode]; !skip {
+					ev.Action = "hit"
+					ev.Value = r.Path
+					ev.Stage = "dirs"
+					ev.N = done
+					ev.Total = total
+					e.emit(ev)
+					return
+				}
 			}
 			e.emitTick("dirs", done, total, 25, ev)
 		},
@@ -659,21 +876,27 @@ func (e *Engine) dirs(ctx context.Context, t Target) ([]Artifact, error) {
 	}
 	var out []Artifact
 	for _, r := range res {
-		if r.Error != "" || r.StatusCode == 0 || r.StatusCode == 404 {
+		if r.Error != "" || r.StatusCode == 0 {
+			continue
+		}
+		if _, skip := hideSet[r.StatusCode]; skip {
 			continue
 		}
 		path := "/" + strings.TrimLeft(r.Path, "/")
+		if !IsSanePath(path) {
+			continue
+		}
 		out = append(out, Artifact{
 			Kind:   KindPath,
 			Value:  path,
 			Source: "dirs",
-			Extra:  map[string]string{"status": fmt.Sprintf("%d", r.StatusCode), "length": fmt.Sprintf("%d", r.Length)},
+			Extra:  map[string]string{"status": fmt.Sprintf("%d", r.StatusCode), "length": fmt.Sprintf("%d", r.Length), "host": host},
 		})
 	}
 	return out, nil
 }
 
-func (e *Engine) params(ctx context.Context, t Target) ([]Artifact, error) {
+func (e *Engine) params(ctx context.Context, t Target, opt StageOptions) ([]Artifact, error) {
 	base := t.BaseURL
 	if base == "" {
 		base = "https://" + t.Domain + "/"
@@ -683,15 +906,41 @@ func (e *Engine) params(ctx context.Context, t Target) ([]Artifact, error) {
 		sep = "&"
 	}
 	template := strings.TrimRight(base, "&") + sep + "FUZZ=1"
-	words := e.Lists.LoadFirst(wordlist.Params(), wordlist.DefaultParams...)
+	words := e.stageWords(opt, wordlist.Params(), wordlist.DefaultParams...)
+	filtered := words[:0]
+	for _, w := range words {
+		if IsTrackingParam(w) {
+			continue
+		}
+		filtered = append(filtered, w)
+	}
+	words = filtered
+	max := opt.limit(len(words), 20000)
+	if max < len(words) {
+		words = words[:max]
+	}
+	path := "/"
+	host := t.Domain
+	if u, err := url.Parse(base); err == nil {
+		if u.Path != "" {
+			path = u.Path
+		}
+		if u.Hostname() != "" {
+			host = u.Hostname()
+		}
+	}
+	hide := opt.Hide
+	if len(hide) == 0 {
+		hide = []int{404}
+	}
 	e.emit(ProgressEvent{Stage: "params", Action: "get", URL: template, Total: len(words)})
 	hits, err := fuzz.Run(ctx, fuzz.Options{
 		URL:      template,
 		Wordlist: words,
-		Workers:  6,
-		RPS:      10,
-		Timeout:  8 * time.Second,
-		Hide:     []int{404},
+		Workers:  opt.workers(10),
+		RPS:      opt.rps(15),
+		Timeout:  time.Duration(opt.timeout(8)) * time.Second,
+		Hide:     hide,
 		OnProgress: func(done, total int, h fuzz.Hit) {
 			ev := ProgressEvent{URL: h.URL, Value: h.Payload, Status: h.StatusCode, Err: h.Error}
 			if h.Error == "" && h.StatusCode != 0 && h.StatusCode != 404 {
@@ -709,18 +958,10 @@ func (e *Engine) params(ctx context.Context, t Target) ([]Artifact, error) {
 		return nil, err
 	}
 	var out []Artifact
-	baseLen := 0
 	counts := map[int]int{}
 	for _, h := range hits {
 		counts[h.Length]++
 	}
-	for lenVal, n := range counts {
-		if n > baseLen {
-			baseLen = n
-			_ = lenVal
-		}
-	}
-	// Keep responses whose length is uncommon among the batch — likely a real param.
 	commonLen := 0
 	commonN := 0
 	for l, n := range counts {
@@ -730,7 +971,7 @@ func (e *Engine) params(ctx context.Context, t Target) ([]Artifact, error) {
 		}
 	}
 	for _, h := range hits {
-		if h.StatusCode == 404 || h.Error != "" {
+		if h.StatusCode == 404 || h.Error != "" || IsTrackingParam(h.Payload) {
 			continue
 		}
 		if h.Length == commonLen && commonN > 3 {
@@ -740,10 +981,34 @@ func (e *Engine) params(ctx context.Context, t Target) ([]Artifact, error) {
 			Kind:   KindParam,
 			Value:  h.Payload,
 			Source: "params",
-			Extra:  map[string]string{"status": fmt.Sprintf("%d", h.StatusCode)},
+			Extra:  map[string]string{"status": fmt.Sprintf("%d", h.StatusCode), "path": path, "host": host},
 		})
 	}
 	return out, nil
+}
+
+func (e *Engine) stageWords(opt StageOptions, fallback []string, seclists ...string) []string {
+	if len(opt.Wordlist) > 0 {
+		out := make([]string, 0, len(opt.Wordlist))
+		for _, w := range opt.Wordlist {
+			w = strings.TrimSpace(w)
+			if w != "" {
+				out = append(out, w)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	if opt.WordlistPath != "" && e.Lists != nil {
+		if words, err := e.Lists.Load(opt.WordlistPath); err == nil && len(words) > 0 {
+			return words
+		}
+	}
+	if e.Lists != nil {
+		return e.Lists.LoadFirst(fallback, seclists...)
+	}
+	return fallback
 }
 
 func liveOrSeed(t Target, arts []Artifact) []string {
@@ -751,7 +1016,7 @@ func liveOrSeed(t Target, arts []Artifact) []string {
 	seen := map[string]struct{}{}
 	add := func(h string) {
 		h = strings.ToLower(strings.TrimSpace(h))
-		if h == "" {
+		if h == "" || (t.Domain != "" && !SameScope(h, t.Domain)) {
 			return
 		}
 		if _, ok := seen[h]; ok {

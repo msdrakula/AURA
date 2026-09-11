@@ -43,12 +43,21 @@ type Options struct {
 // payloads, observing the response for evidence of a vulnerability.
 func Scan(ctx context.Context, opts Options) (*ScanResult, error) {
 	start := time.Now()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 15 * time.Second
 	}
 	// Baseline request.
-	base := send(opts, opts.Raw)
+	base := send(ctx, opts, opts.Raw)
 	if base == nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		return nil, fmt.Errorf("baseline request failed")
 	}
 	baseBody := bodyOf(base.ResponseRaw)
@@ -62,6 +71,9 @@ func Scan(ctx context.Context, opts Options) (*ScanResult, error) {
 
 	var findings []Finding
 	for _, p := range params {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// SQL injection error-based
 		if f := checkSQLi(ctx, opts, p, baseBody); f != nil {
 			findings = append(findings, *f)
@@ -83,6 +95,9 @@ func Scan(ctx context.Context, opts Options) (*ScanResult, error) {
 			findings = append(findings, *f)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Header-based checks
 	if f := checkCORS(opts, headers, base); f != nil {
 		findings = append(findings, *f)
@@ -103,8 +118,15 @@ func Scan(ctx context.Context, opts Options) (*ScanResult, error) {
 	}, nil
 }
 
-func send(opts Options, raw string) *repeater.Result {
-	res := repeater.Send(context.Background(), repeater.Options{
+func send(ctx context.Context, opts Options, raw string) *repeater.Result {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil
+		}
+	} else {
+		ctx = context.Background()
+	}
+	res := repeater.Send(ctx, repeater.Options{
 		Raw: raw, Scheme: opts.Scheme, Target: opts.Target,
 		Verify: opts.Verify, Timeout: opts.Timeout,
 	})
@@ -174,7 +196,7 @@ func checkSQLi(ctx context.Context, opts Options, param, baseBody string) *Findi
 		// no param matched; append to path
 		modified = strings.Replace(opts.Raw, " HTTP/1.1", " HTTP/1.1", 1)
 	}
-	res := send(opts, modified)
+	res := send(ctx, opts, modified)
 	if res == nil {
 		return nil
 	}
@@ -193,7 +215,7 @@ func checkSQLi(ctx context.Context, opts Options, param, baseBody string) *Findi
 func checkXSS(ctx context.Context, opts Options, param, baseBody string) *Finding {
 	probe := "auraxssprobe9x7q"
 	modified := injectParam(opts.Raw, param, probe)
-	res := send(opts, modified)
+	res := send(ctx, opts, modified)
 	if res == nil {
 		return nil
 	}
@@ -217,7 +239,7 @@ func checkXSS(ctx context.Context, opts Options, param, baseBody string) *Findin
 func checkPathTraversal(ctx context.Context, opts Options, param, baseBody string) *Finding {
 	probe := "../../../../../../etc/passwd"
 	modified := injectParam(opts.Raw, param, probe)
-	res := send(opts, modified)
+	res := send(ctx, opts, modified)
 	if res == nil {
 		return nil
 	}
@@ -237,7 +259,7 @@ func checkPathTraversal(ctx context.Context, opts Options, param, baseBody strin
 func checkCommandInjection(ctx context.Context, opts Options, param, baseBody string) *Finding {
 	probe := ";echo auracmd9x7q"
 	modified := injectParam(opts.Raw, param, probe)
-	res := send(opts, modified)
+	res := send(ctx, opts, modified)
 	if res == nil {
 		return nil
 	}
@@ -254,7 +276,7 @@ func checkCommandInjection(ctx context.Context, opts Options, param, baseBody st
 func checkOpenRedirect(ctx context.Context, opts Options, param string) *Finding {
 	probe := "https://evil.example.com/"
 	modified := injectParam(opts.Raw, param, probe)
-	res := send(opts, modified)
+	res := send(ctx, opts, modified)
 	if res == nil {
 		return nil
 	}

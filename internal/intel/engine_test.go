@@ -193,6 +193,7 @@ func TestWebPortsUsesDial(t *testing.T) {
 			_ = c2.Close()
 			return c1, nil
 		},
+		HTTP: &http.Client{Transport: okTransport{}},
 	}
 	tg, err := eng.EnsureTarget("lab.local", true)
 	if err != nil {
@@ -207,6 +208,84 @@ func TestWebPortsUsesDial(t *testing.T) {
 	if res.Added < 1 {
 		t.Fatalf("ports added=%d", res.Added)
 	}
+}
+
+func TestWebPortsIncludesURLPort(t *testing.T) {
+	st := newMem()
+	var seen []string
+	eng := &Engine{
+		Store: st,
+		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			seen = append(seen, addr)
+			return nil, errors.New("closed")
+		},
+	}
+	tg, err := eng.EnsureTarget("https://62.173.140.174:16126/", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if _, err := eng.RunStage(ctx, tg.ID, "web_ports"); err != nil {
+		t.Fatal(err)
+	}
+	want := "62.173.140.174:16126"
+	if len(seen) == 0 || seen[0] != want {
+		t.Fatalf("URL port should be first, got %v", seen)
+	}
+}
+
+func TestWebPortsTCPOnlyNotCounted(t *testing.T) {
+	st := newMem()
+	eng := &Engine{
+		Store: st,
+		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			c1, c2 := net.Pipe()
+			_ = c2.Close()
+			return c1, nil
+		},
+		HTTP: &http.Client{Transport: failTransport{}},
+	}
+	tg, err := eng.EnsureTarget("lab.local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	res, err := eng.RunStage(ctx, tg.ID, "web_ports")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Added != 0 {
+		t.Fatalf("TCP-only ports must not be counted as web, added=%d", res.Added)
+	}
+}
+
+func TestWebPortListPutsURLPortFirst(t *testing.T) {
+	ports := webPortList("https://62.173.140.174:16126/")
+	if len(ports) == 0 || ports[0] != "16126" {
+		t.Fatalf("got %v", ports)
+	}
+}
+
+type okTransport struct{}
+
+func (okTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: 200,
+		Body:       io.NopCloser(strings.NewReader("ok")),
+		Header:     make(http.Header),
+		Request:    req,
+		Proto:      "HTTP/1.1",
+		ProtoMajor: 1,
+		ProtoMinor: 1,
+	}, nil
+}
+
+type failTransport struct{}
+
+func (failTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("no http")
 }
 
 type blockingTransport struct{}

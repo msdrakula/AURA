@@ -29,6 +29,9 @@ func (s *Server) intelList(w http.ResponseWriter, _ *http.Request) {
 		writeErr(w, 500, err.Error())
 		return
 	}
+	if list == nil {
+		list = []intel.Target{}
+	}
 	writeJSON(w, 200, map[string]any{"items": list})
 }
 
@@ -66,7 +69,11 @@ func (s *Server) intelRunStage(w http.ResponseWriter, r *http.Request) {
 	}
 	id := r.PathValue("id")
 	stage := r.PathValue("stage")
-	res, err := s.Intel.RunStage(r.Context(), id, stage)
+	var opt intel.StageOptions
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&opt)
+	}
+	res, err := s.Intel.RunStage(r.Context(), id, stage, opt)
 	stopped := r.Context().Err() != nil
 	if err != nil && !stopped && res.Added == 0 && res.Stage.Status != intel.StatusError {
 		writeErr(w, 400, err.Error())

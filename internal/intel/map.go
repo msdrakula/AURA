@@ -35,6 +35,9 @@ func BuildMap(t Target, arts []Artifact) AppMap {
 	stats := MapStats{}
 
 	for _, a := range arts {
+		if !artifactInScope(a, t.Domain) {
+			continue
+		}
 		switch a.Kind {
 		case KindSubdomain:
 			ensure(a.Value)
@@ -68,12 +71,26 @@ func BuildMap(t Target, arts []Artifact) AppMap {
 				pn.Status = st
 			}
 		case KindParam:
+			if IsTrackingParam(a.Value) {
+				continue
+			}
 			stats.Params++
-			acc := ensure(t.Domain)
-			pn := acc.paths["/"]
+			h := a.Extra["host"]
+			if h == "" {
+				h = t.Domain
+			}
+			acc := ensure(h)
+			p := a.Extra["path"]
+			if p == "" {
+				p = "/"
+			}
+			if !IsSanePath(p) {
+				p = "/"
+			}
+			pn := acc.paths[p]
 			if pn == nil {
-				pn = &PathNode{Path: "/"}
-				acc.paths["/"] = pn
+				pn = &PathNode{Path: p}
+				acc.paths[p] = pn
 			}
 			if !contains(pn.Params, a.Value) {
 				pn.Params = append(pn.Params, a.Value)
@@ -118,10 +135,11 @@ func BuildMap(t Target, arts []Artifact) AppMap {
 				pn.URLs = append(pn.URLs, a.Value)
 			}
 			for key := range u.Query() {
-				if !contains(pn.Params, key) {
-					pn.Params = append(pn.Params, key)
-					stats.Params++
+				if IsTrackingParam(key) || contains(pn.Params, key) {
+					continue
 				}
+				pn.Params = append(pn.Params, key)
+				stats.Params++
 			}
 		}
 	}

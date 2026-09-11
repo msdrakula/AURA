@@ -65,3 +65,14 @@ func TestGenerateCombinations(t *testing.T) {
 		})
 	}
 }
+
+func TestAttackCombinationsCapsCombo(t *testing.T) {
+	t.Parallel()
+	set := make([]string, 200)
+	for i := range set {
+		set[i] = "x"
+	}
+	_, err := attackCombinations("combo", 2, [][]string{set, set})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too many combinations")
+}

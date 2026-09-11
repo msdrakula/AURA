@@ -42,6 +42,12 @@ func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, "wordlist is required")
 		return
 	}
+	if body.Workers > 30 {
+		body.Workers = 30
+	}
+	if body.RPS > 50 {
+		body.RPS = 50
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
 	var onResult func(string, string)
@@ -94,9 +100,17 @@ func (s *Server) scannerRun(w http.ResponseWriter, r *http.Request) {
 	res, err := scanner.Scan(ctx, scanner.Options{
 		Raw: body.Raw, Scheme: body.Scheme, Target: body.Target, Timeout: 15 * time.Second,
 	})
-	if err != nil && ctx.Err() == nil {
+	if ctx.Err() != nil {
+		writeErr(w, 408, "scan stopped or timed out")
+		return
+	}
+	if err != nil {
 		s.Log.Warn("scanner: run", zap.Error(err))
-		writeErr(w, 500, err.Error())
+		if strings.Contains(strings.ToLower(err.Error()), "baseline") {
+			writeErr(w, 502, err.Error())
+			return
+		}
+		writeErr(w, 400, err.Error())
 		return
 	}
 	if res == nil {

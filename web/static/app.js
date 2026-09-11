@@ -71,6 +71,22 @@ function setWork(msg) {
   if (tx) tx.textContent = msg;
 }
 
+let flashTimer = null;
+function uiFlash(msg, kind) {
+  const el = $("#uiFlash");
+  const text = String(msg || "");
+  if (!text) return;
+  if (!el) {
+    console.warn(text);
+    return;
+  }
+  el.textContent = text;
+  el.classList.toggle("ok", kind === "ok");
+  el.classList.remove("hidden");
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => el.classList.add("hidden"), kind === "ok" ? 4000 : 8000);
+}
+
 function markBusy(btn, on, label) {
   if (!btn) return;
   if (on) {
@@ -180,6 +196,23 @@ function applyTheme(name) {
   }
 }
 
+function migrateNavOrder(order, defaults) {
+  const def = (defaults && defaults.length) ? defaults.slice() : ["map", "scope", "proxy"];
+  const seen = new Set();
+  const out = [];
+  for (let id of order || []) {
+    if (id === "extensions") continue;
+    if (id === "target") id = "scope";
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  for (const id of def) {
+    if (!seen.has(id)) out.push(id);
+  }
+  return out;
+}
+
 const UILayout = {
   key: "aura_ui_v3",
   defaults: {
@@ -189,10 +222,13 @@ const UILayout = {
     showTag: true,
     lastView: "map",
     lastProxySub: "intercept",
+    lastMapSub: "sitemap",
+    uiLocked: false,
+    tabOrder: ["map", "scope", "proxy", "discover", "fuzz", "intruder", "repeater", "scanner", "logger", "decoder", "comparer", "sequencer", "collaborator", "organizer", "other"],
     splits: {
       "proxy-intercept": [22, 78],
       "proxy-history": [46, 54],
-      "map-layout": [38, 62],
+      "map-layout": [54, 46],
       "map-app": [58, 42],
       "target-sitemap": [34, 66],
       "rep-layout": [38, 38, 24],
@@ -221,7 +257,11 @@ const UILayout = {
     this.data = {
       ...this.defaults,
       ...saved,
+      lastView: saved.lastView === "target" ? "map" : (saved.lastView || this.defaults.lastView),
+      lastMapSub: saved.lastMapSub === "target" ? "sitemap" : (saved.lastMapSub || this.defaults.lastMapSub),
       splits: { ...this.defaults.splits, ...(saved.splits || {}) },
+      tabOrder: migrateNavOrder(Array.isArray(saved.tabOrder) ? saved.tabOrder : [], this.defaults.tabOrder),
+      uiLocked: !!saved.uiLocked,
     };
   },
   save() {
@@ -239,6 +279,24 @@ const UILayout = {
     if (tagEl) tagEl.checked = this.data.showTag !== false;
     if ($("#setUiScaleVal")) $("#setUiScaleVal").textContent = ui + "%";
     if ($("#setEditorScaleVal")) $("#setEditorScaleVal").textContent = ed + "%";
+    document.documentElement.setAttribute("data-ui-locked", this.data.uiLocked ? "1" : "0");
+    this.syncLockButton();
+    const nav = $("#mainTabs");
+    if (nav) nav.title = this.data.uiLocked ? "" : tr("set.dragTabs");
+  },
+  syncLockButton() {
+    const btn = $("#btnLockUi");
+    if (!btn) return;
+    const locked = !!this.data.uiLocked;
+    btn.dataset.i18n = locked ? "set.unlockUi" : "set.lockUi";
+    btn.textContent = tr(locked ? "set.unlockUi" : "set.lockUi");
+    btn.classList.toggle("primary", !locked);
+    if ($("#setLockMsg")) $("#setLockMsg").textContent = locked ? tr("set.lockOn") : "";
+  },
+  setLocked(on) {
+    this.data.uiLocked = !!on;
+    this.save();
+    this.applyChrome();
   },
   panes(el) {
     return [...el.children].filter((c) => !c.classList.contains("gutter"));
@@ -257,7 +315,7 @@ const UILayout = {
       p.style.flex = "";
       p.style.minWidth = "0";
       p.style.minHeight = "0";
-      p.style.overflow = "hidden";
+      p.style.removeProperty("overflow");
     });
     el.style.display = "grid";
     el.style.flex = "1 1 auto";
@@ -293,10 +351,14 @@ const UILayout = {
     this.applySplit(el);
   },
   bindGutter(el, gutter, index, dir) {
-    const minPx = 72;
+    const minPx = 80;
     const onDown = (e) => {
+      if (this.data.uiLocked) return;
       if (e.button != null && e.button !== 0) return;
       e.preventDefault();
+      if (e.pointerId != null && gutter.setPointerCapture) {
+        try { gutter.setPointerCapture(e.pointerId); } catch (_) {}
+      }
       const panes = this.panes(el);
       const a = panes[index], b = panes[index + 1];
       if (!a || !b) return;
@@ -327,8 +389,9 @@ const UILayout = {
       const up = () => {
         gutter.classList.remove("is-drag");
         document.body.classList.remove("is-resizing-v", "is-resizing-h");
-        document.removeEventListener("mousemove", move);
-        document.removeEventListener("mouseup", up);
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        document.removeEventListener("pointercancel", up);
         const panes2 = this.panes(el);
         const dims = panes2.map((p) => {
           const r = p.getBoundingClientRect();
@@ -338,11 +401,13 @@ const UILayout = {
         this.data.splits[el.dataset.split] = dims.map((s) => Math.round((s / sum) * 1000) / 10);
         this.save();
       };
-      document.addEventListener("mousemove", move);
-      document.addEventListener("mouseup", up);
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+      document.addEventListener("pointercancel", up);
     };
-    gutter.addEventListener("mousedown", onDown);
+    gutter.addEventListener("pointerdown", onDown);
     gutter.addEventListener("dblclick", () => {
+      if (this.data.uiLocked) return;
       const def = this.defaults.splits[el.dataset.split];
       if (def) this.data.splits[el.dataset.split] = def.slice();
       this.applySplit(el);
@@ -354,19 +419,24 @@ const UILayout = {
   },
   resetLayout() {
     this.data.splits = { ...this.defaults.splits };
+    this.data.tabOrder = this.defaults.tabOrder.slice();
     this.save();
     this.refresh();
+    NavTabs.applyOrder();
   },
   resetVisual() {
     this.data.theme = this.defaults.theme;
     this.data.uiScale = this.defaults.uiScale;
     this.data.editorScale = this.defaults.editorScale;
     this.data.showTag = true;
+    this.data.uiLocked = false;
+    this.data.tabOrder = this.defaults.tabOrder.slice();
     this.data.splits = { ...this.defaults.splits };
     this.save();
     applyTheme("dark");
     this.applyChrome();
     this.refresh();
+    NavTabs.applyOrder();
   },
   open(tab) {
     const ov = $("#settingsOverlay");
@@ -422,6 +492,116 @@ const UILayout = {
       this.resetLayout();
       if ($("#setLayoutMsg")) $("#setLayoutMsg").textContent = tr("set.layoutReset");
     });
+    $("#btnLockUi")?.addEventListener("click", () => {
+      this.setLocked(!this.data.uiLocked);
+      if ($("#setLockMsg")) $("#setLockMsg").textContent = tr(this.data.uiLocked ? "set.lockOn" : "set.lockOff");
+    });
+    NavTabs.init();
+  },
+};
+
+const NavTabs = {
+  suppressClick: false,
+  init() {
+    this.applyOrder();
+    this.bind();
+  },
+  buttons() {
+    return $$("#mainTabs button[data-view]");
+  },
+  applyOrder() {
+    const nav = $("#mainTabs");
+    if (!nav || !UILayout.data) return;
+    const map = new Map(this.buttons().map((b) => [b.dataset.view, b]));
+    const order = UILayout.data.tabOrder || UILayout.defaults.tabOrder;
+    const seen = new Set();
+    for (const id of order) {
+      if (id === "extensions") continue;
+      const b = map.get(id);
+      if (!b) continue;
+      nav.appendChild(b);
+      seen.add(id);
+    }
+    for (const [id, b] of map) {
+      if (id === "extensions" || seen.has(id)) continue;
+      nav.appendChild(b);
+    }
+    const ext = map.get("extensions");
+    if (ext) nav.appendChild(ext);
+    nav.title = UILayout.data.uiLocked ? "" : tr("set.dragTabs");
+  },
+  saveOrder() {
+    if (!UILayout.data) return;
+    UILayout.data.tabOrder = this.buttons()
+      .map((b) => b.dataset.view)
+      .filter((id) => id && id !== "extensions");
+    UILayout.save();
+  },
+  bind() {
+    const nav = $("#mainTabs");
+    if (!nav || nav.dataset.navReady === "1") return;
+    nav.dataset.navReady = "1";
+    nav.addEventListener("click", (e) => {
+      if (this.suppressClick) {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        return;
+      }
+      const b = e.target.closest("button[data-view]");
+      if (!b || b.hidden || b.classList.contains("hidden")) return;
+      showView(b.dataset.view);
+    });
+    nav.addEventListener("pointerdown", (e) => {
+      if (UILayout.data && UILayout.data.uiLocked) return;
+      if (e.button != null && e.button !== 0) return;
+      const btn = e.target.closest("#mainTabs button[data-view]");
+      if (!btn || btn.hidden || btn.dataset.view === "extensions") return;
+      this.startDrag(btn, e);
+    });
+  },
+  startDrag(btn, e) {
+    const nav = $("#mainTabs");
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+    const onMove = (ev) => {
+      if (!dragging) {
+        if (Math.abs(ev.clientX - startX) < 8 && Math.abs(ev.clientY - startY) < 8) return;
+        dragging = true;
+        btn.classList.add("is-dragging");
+        document.body.classList.add("is-dragging-tabs");
+        if (ev.pointerId != null && btn.setPointerCapture) {
+          try { btn.setPointerCapture(ev.pointerId); } catch (_) {}
+        }
+      }
+      btn.style.pointerEvents = "none";
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      btn.style.pointerEvents = "";
+      const over = under && under.closest("#mainTabs button[data-view]");
+      if (!over || over === btn || over.dataset.view === "extensions") return;
+      const rect = over.getBoundingClientRect();
+      if (ev.clientX > rect.left + rect.width / 2) {
+        nav.insertBefore(btn, over.nextSibling);
+      } else {
+        nav.insertBefore(btn, over);
+      }
+      const ext = nav.querySelector('[data-view="extensions"]');
+      if (ext) nav.appendChild(ext);
+    };
+    const onUp = () => {
+      document.removeEventListener("pointermove", onMove);
+      document.removeEventListener("pointerup", onUp);
+      document.removeEventListener("pointercancel", onUp);
+      btn.classList.remove("is-dragging");
+      document.body.classList.remove("is-dragging-tabs");
+      if (!dragging) return;
+      this.suppressClick = true;
+      setTimeout(() => { this.suppressClick = false; }, 0);
+      this.saveOrder();
+    };
+    document.addEventListener("pointermove", onMove);
+    document.addEventListener("pointerup", onUp);
+    document.addEventListener("pointercancel", onUp);
   },
 };
 
@@ -466,6 +646,7 @@ async function api(path, opts = {}) {
 }
 
 function showView(name) {
+  if (name === "extensions" || name === "target") name = "map";
   DebugLog.log({ level: "info", module: "nav", action: "view", msg: name, fields: { view: name } });
   $$(".view").forEach((el) => el.classList.add("hidden"));
   const pane = $(`#view-${name}`);
@@ -478,9 +659,16 @@ function showView(name) {
   }
   if (name === "intruder" && typeof intruder !== "undefined" && intruder.tabs.length === 0) newIntruderTab("");
   if (name === "discover" || name === "fuzz") loadSecLists();
-  if (name === "map") { loadMap(); }
+  if (name === "map") {
+    loadSiteMap();
+    loadMap();
+    let sub = UILayout.data && UILayout.data.lastMapSub;
+    if (sub === "target") sub = "sitemap";
+    showSub("#view-map", sub || "sitemap");
+  }
   if (name === "dashboard") refreshDashboard();
-  if (name === "target") { loadSiteMap(); loadIssues(); renderScope(); renderIssueDefs(); }
+  if (name === "scope") { renderScope(); }
+  if (name === "other") { loadIssues(); renderIssueDefs(); }
   if (name === "proxy") { renderMr(); }
   if (name === "organizer") { loadOrganizer(); }
   if (name === "logger") { loadLogs(); }
@@ -492,6 +680,10 @@ function showSub(group, name) {
   $$(`${group} .subtabs button`).forEach((b) => b.classList.toggle("active", b.dataset.sub === name));
   if (group === "#view-proxy" && UILayout && UILayout.data) {
     UILayout.data.lastProxySub = name;
+    UILayout.save();
+  }
+  if (group === "#view-map" && UILayout && UILayout.data) {
+    UILayout.data.lastMapSub = name;
     UILayout.save();
   }
   requestAnimationFrame(() => UILayout && UILayout.refresh());
@@ -640,11 +832,11 @@ function connectWs() {
   };
 }
 
-$$("#mainTabs button").forEach((b) => b.addEventListener("click", () => showView(b.dataset.view)));
 $$("#proxySubtabs button").forEach((b) => b.addEventListener("click", () => {
   showSub("#view-proxy", b.dataset.sub);
   if (b.dataset.sub === "settings") UILayout.open("proxy");
 }));
+$$("#mapSubtabs button").forEach((b) => b.addEventListener("click", () => showSub("#view-map", b.dataset.sub)));
 
 $("#interceptReq").addEventListener("change", saveSettings);
 $("#interceptResp").addEventListener("change", saveSettings);
@@ -661,8 +853,8 @@ async function saveSettings(extra = {}) {
 async function startProxy() { await saveSettings(); await api("/api/proxy/start", { method: "POST" }); await loadStatus(); }
 async function stopProxy() { await api("/api/proxy/stop", { method: "POST" }); await loadStatus(); }
 async function launchBrowser() {
-  try { const r = await api("/api/proxy/launch-browser", { method: "POST" }); alert(tr("browser.launched", { proxy: r.proxy })); }
-  catch (e) { alert(e.message); }
+  try { const r = await api("/api/proxy/launch-browser", { method: "POST" }); uiFlash(tr("browser.launched", { proxy: r.proxy }), "ok"); }
+  catch (e) { uiFlash(e.message); }
 }
 $("#btnStart").addEventListener("click", startProxy);
 $("#btnStop").addEventListener("click", stopProxy);
@@ -671,28 +863,28 @@ $("#btnLaunchBrowser").addEventListener("click", launchBrowser);
 $("#btnForward").addEventListener("click", async () => {
   const c = state.pending[0]; if (!c) return;
   const id = c.id;
-  if (!id) { alert(tr("proxy.forwardErr", { msg: "no id" })); return; }
+  if (!id) { uiFlash(tr("proxy.forwardErr", { msg: "no id" })); return; }
   let raw = $("#interceptEditor").value;
   try { raw = applyMatchReplace(raw, c.phase); } catch (e) { DebugLog.log({ level: "error", module: "proxy", action: "matchreplace", msg: e.message }); }
   try {
     await api(`/api/intercept/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify({ action: "forward", raw }) });
   } catch (e) {
     DebugLog.log({ level: "error", module: "proxy", action: "forward", msg: e.message, fields: { id } });
-    alert(tr("proxy.forwardErr", { msg: e.message }));
+    uiFlash(tr("proxy.forwardErr", { msg: e.message }));
   }
 });
 $("#btnForwardAll").addEventListener("click", async () => {
   try { await api("/api/intercept/forward-all", { method: "POST" }); }
-  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
+  catch (e) { uiFlash(tr("proxy.forwardErr", { msg: e.message })); }
 });
 $("#btnDrop").addEventListener("click", async () => {
   const c = state.pending[0]; if (!c) return;
   try { await api(`/api/intercept/${encodeURIComponent(c.id)}`, { method: "POST", body: JSON.stringify({ action: "drop" }) }); }
-  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
+  catch (e) { uiFlash(tr("proxy.forwardErr", { msg: e.message })); }
 });
 $("#btnDropAll").addEventListener("click", async () => {
   try { await api("/api/intercept/drop-all", { method: "POST" }); }
-  catch (e) { alert(tr("proxy.forwardErr", { msg: e.message })); }
+  catch (e) { uiFlash(tr("proxy.forwardErr", { msg: e.message })); }
 });
 $("#interceptList").addEventListener("click", (e) => {
   const tr = e.target.closest("tr"); if (!tr) return;
@@ -927,7 +1119,7 @@ function renderIntruderResults() {
 function updatePositionsCount() {
   const t = curIntr(); if (!t) return;
   const n = (t.template.match(/§/g) || []).length / 2;
-  $("#intrPositionsCount").textContent = `${Math.floor(n)} payload positions`;
+  $("#intrPositionsCount").textContent = tr("intr.positions", { n: Math.floor(n) });
 }
 $("#intrTemplate").addEventListener("input", () => { const t = curIntr(); if (t) { t.template = $("#intrTemplate").value; updatePositionsCount(); } });
 $("#intrScheme").addEventListener("change", () => { const t = curIntr(); if (t) t.scheme = $("#intrScheme").value; });
@@ -960,14 +1152,14 @@ $("#btnIntrAutoMark").addEventListener("click", () => {
 });
 $("#btnIntrRun").addEventListener("click", async () => {
   const t = curIntr(); if (!t) return;
-  if (!t.template) { alert(tr("intr.emptyTpl")); return; }
+  if (!t.template) { uiFlash(tr("intr.emptyTpl")); return; }
   const sets = t.payloadSets.map((p) => p.split("\n").map((x) => x.trim()).filter(Boolean));
   const positions = Math.floor((t.template.match(/§/g) || []).length / 2);
-  if (positions === 0) { alert(tr("intr.noMarks")); return; }
+  if (positions === 0) { uiFlash(tr("intr.noMarks")); return; }
   const mode = ({ sniper: "one", battering_ram: "same", pitchfork: "zip", cluster_bomb: "combo" }[t.attackType] || t.attackType);
-  if ((mode === "one" || mode === "same") && sets.length !== 1) { alert(tr("intr.needOneSet", { type: tr("intr.mode." + mode), n: sets.length })); return; }
-  if ((mode === "zip" || mode === "combo") && sets.length !== positions) { alert(tr("intr.needNSets", { type: tr("intr.mode." + mode), need: positions, n: sets.length })); return; }
-  if (sets.every((s) => s.length === 0)) { alert(tr("intr.emptySets")); return; }
+  if ((mode === "one" || mode === "same") && sets.length !== 1) { uiFlash(tr("intr.needOneSet", { type: tr("intr.mode." + mode), n: sets.length })); return; }
+  if ((mode === "zip" || mode === "combo") && sets.length !== positions) { uiFlash(tr("intr.needNSets", { type: tr("intr.mode." + mode), need: positions, n: sets.length })); return; }
+  if (sets.every((s) => s.length === 0)) { uiFlash(tr("intr.emptySets")); return; }
   $("#btnIntrRun").disabled = true;
   t.results = [];
   try {
@@ -991,7 +1183,7 @@ $("#btnIntrRun").addEventListener("click", async () => {
     });
     if (!data || data.aborted) return;
     t.results = data || []; renderIntruderResults();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 });
 $("#btnIntrToIntruder").addEventListener("click", () => {
   const t = curIntr(); if (!t) return;
@@ -1007,8 +1199,8 @@ $("#btnCallbackRefresh").addEventListener("click", loadCallback);
 $("#callbackId").addEventListener("keydown", (e) => { if (e.key === "Enter") loadCallback(); });
 $("#btnCallbackCopy").addEventListener("click", () => { const id = $("#callbackId").value.trim() || "<request-id>"; navigator.clipboard.writeText(`http://127.0.0.1:8082/${id}/`); });
 
-/* TARGET: Site map, Scope, Issues */
-$$("#targetSubtabs button").forEach((b) => b.addEventListener("click", () => showSub("#view-target", b.dataset.sub)));
+/* TARGET: Site map (on Map), Scope, Issues */
+$$("#otherSubtabs button").forEach((b) => b.addEventListener("click", () => showSub("#view-other", b.dataset.sub)));
 
 const scope = {
   inc: JSON.parse(localStorage.getItem("aura_scope_inc") || localStorage.getItem("meb_scope_inc") || "[]"),
@@ -1066,11 +1258,67 @@ document.addEventListener("click", (e) => {
 
 let siteItems = [];
 let siteSelectedId = null;
-async function loadSiteMap() { siteItems = (await api("/api/history?q=")).items; renderSiteMap(); }
+async function loadSiteMap() {
+  try {
+    siteItems = (await api("/api/history?q=")).items || [];
+  } catch (_) {
+    siteItems = siteItems || [];
+  }
+  renderSiteMap();
+}
+function emptySiteNode() {
+  return { _leaf: null, _intelHost: null, _intelPath: null, _children: {} };
+}
+function walkSiteNode(tree, host, parts) {
+  let node = tree[host] = tree[host] || emptySiteNode();
+  for (const p of parts) node = node._children[p] = node._children[p] || emptySiteNode();
+  return node;
+}
+function intelHostUrl(host, path) {
+  const p = path || "/";
+  return "https://" + host + (p.startsWith("/") ? p : "/" + p);
+}
+function mergeIntelIntoSiteTree(tree, filter, applyScope) {
+  for (const h of (mapState.map && mapState.map.hosts) || []) {
+    const host = h.host || "?";
+    if (filter && !host.toLowerCase().includes(filter)) {
+      const anyPath = (h.paths || []).some((p) => `${host} ${p.path || "/"}`.toLowerCase().includes(filter));
+      if (!anyPath) continue;
+    }
+    if (applyScope && !scopeMatches(intelHostUrl(host, "/")) && !(h.paths || []).some((p) => scopeMatches(intelHostUrl(host, p.path || "/")))) {
+      continue;
+    }
+    const hostNode = walkSiteNode(tree, host, []);
+    hostNode._intelHost = h;
+    for (const p of h.paths || []) {
+      let path = p.path || "/";
+      if (path !== "/" && !path.startsWith("/")) path = "/" + path;
+      if (filter && !(`${host} ${path} ${(p.params || []).join(" ")}`.toLowerCase().includes(filter))) continue;
+      if (applyScope && !scopeMatches(intelHostUrl(host, path))) continue;
+      const parts = path.split("/").filter(Boolean);
+      const node = walkSiteNode(tree, host, parts);
+      node._intelPath = p;
+    }
+  }
+}
+function hasSiteMapData() {
+  if ((siteItems || []).length) return true;
+  if (mapState.map && mapState.map.hosts && mapState.map.hosts.length) return true;
+  return false;
+}
+function syncMapSitePanes() {
+  const showWork = !!mapState.target || hasSiteMapData();
+  $("#mapEmpty")?.classList.toggle("hidden", showWork);
+  $("#mapWork")?.classList.toggle("hidden", !showWork);
+  if ($("#btnMapHistory")) $("#btnMapHistory").disabled = !mapState.target;
+  if ($("#mapStats")) $("#mapStats").classList.toggle("hidden", !mapState.target);
+}
 function renderSiteMap() {
+  const treeEl = $("#siteTree");
+  if (!treeEl) return;
   const filter = ($("#siteFilter")?.value || "").toLowerCase();
   const applyScope = $("#siteApplyScope")?.checked;
-  const items = siteItems.filter((f) => {
+  const items = (siteItems || []).filter((f) => {
     if (filter && !(`${f.method} ${f.host} ${f.path}`.toLowerCase().includes(filter))) return false;
     if (applyScope && !scopeMatches(`${f.scheme || "https"}://${f.host}${f.path}`)) return false;
     return true;
@@ -1079,27 +1327,64 @@ function renderSiteMap() {
   for (const f of items) {
     const host = f.host || "?";
     const parts = (f.path || "/").split("/").filter(Boolean);
-    let node = tree[host] = tree[host] || { _leaf: null, _children: {} };
-    for (const p of parts) node = node._children[p] = node._children[p] || { _leaf: null, _children: {} };
-    node._leaf = f;
+    walkSiteNode(tree, host, parts)._leaf = f;
   }
-  $("#siteTree").innerHTML = Object.keys(tree).sort().map((host) => renderTreeNode(host, tree[host], true)).join("") || `<div class="muted">${tr("empty.sitemap")}</div>`;
+  mergeIntelIntoSiteTree(tree, filter, applyScope);
+  treeEl.innerHTML = Object.keys(tree).sort().map((host) => renderTreeNode(host, tree[host], true, host, "/")).join("") || `<div class="muted">${tr("empty.sitemap")}</div>`;
+  syncMapSitePanes();
 }
-function renderTreeNode(name, node, isHost) {
+function renderTreeNode(name, node, isHost, host, path) {
   const childKeys = Object.keys(node._children).sort();
   const hasChildren = childKeys.length > 0;
   const leaf = node._leaf;
-  const id = "n" + Math.random().toString(36).slice(2, 9);
-  const icon = isHost ? "🔒" : (leaf ? "📄" : "📁");
+  const intelP = node._intelPath;
+  const intelH = isHost ? node._intelHost : null;
+  const nid = "n" + Math.random().toString(36).slice(2, 9);
+  const icon = isHost ? "🔒" : (leaf || intelP ? "📄" : "📁");
+  const status = leaf ? leaf.status : (intelP && intelP.status);
+  const extra = [];
+  if ((intelP?.params || []).length) extra.push((intelP.params || []).slice(0, 4).join(", "));
+  if (isHost && (intelH?.tech || []).length) extra.push((intelH.tech || []).slice(0, 3).join(", "));
+  if (isHost && (intelH?.ports || []).length) extra.push(":" + (intelH.ports || []).slice(0, 4).join(","));
+  if (!leaf && (intelP || intelH)) extra.push(tr("map.srcRecon"));
   return `<div class="tree-node">
-    <div class="tree-row" data-id="${leaf ? leaf.id : ""}">
-      <span class="tree-tw" data-toggle="${id}">${hasChildren ? "▶" : ""}</span>
+    <div class="tree-row" data-id="${leaf ? leaf.id : ""}" data-host="${esc(host)}" data-path="${esc(path || "/")}">
+      <span class="tree-tw" data-toggle="${nid}">${hasChildren ? "▶" : ""}</span>
       <span class="tree-icon">${icon}</span>
       <span>${esc(name)}</span>
-      ${leaf ? `<span class="tree-method ${leaf.method}">${esc(leaf.method)}</span><span class="tree-status ${statusClass(leaf.status)}">${leaf.status || ""}</span>` : ""}
+      ${leaf ? `<span class="tree-method ${leaf.method}">${esc(leaf.method)}</span>` : ""}
+      ${status ? `<span class="tree-status ${statusClass(status)}">${esc(status)}</span>` : (intelH && intelH.live ? `<span class="tree-status status-ok">live</span>` : "")}
+      ${extra.length ? `<span class="tree-status">${esc(extra.filter(Boolean).join(" · "))}</span>` : ""}
     </div>
-    <div id="${id}" class="tree-children hidden">${childKeys.map((k) => renderTreeNode(k, node._children[k], false)).join("")}</div>
+    <div id="${nid}" class="tree-children hidden">${childKeys.map((k) => renderTreeNode(k, node._children[k], false, host, (isHost ? "" : path) + "/" + k)).join("")}</div>
   </div>`;
+}
+function showMapDetailPane(name) {
+  $$("#mapDetailTabs button").forEach((b) => b.classList.toggle("active", b.dataset.pane === name));
+  $("#siteReq")?.classList.toggle("hidden", name !== "req");
+  $("#siteResp")?.classList.toggle("hidden", name !== "resp");
+  $("#mapDetail")?.classList.toggle("hidden", name !== "info");
+  $("#mapLog")?.classList.toggle("hidden", name !== "log");
+}
+function fillMapInfo(host, path) {
+  const detail = $("#mapDetail");
+  if (!detail) return;
+  const h = ((mapState.map && mapState.map.hosts) || []).find((x) => x.host === host);
+  if (!h) {
+    detail.innerHTML = `<strong>${esc(host)}${path && path !== "/" ? esc(path) : ""}</strong><div class="muted">${esc(tr("map.pickNode"))}</div>`;
+    return;
+  }
+  if (path && path !== "/") {
+    const p = (h.paths || []).find((x) => x.path === path || x.path === path.replace(/^\//, ""));
+    detail.innerHTML = `<strong>${esc(host)}${esc(path)}</strong>
+      <div>status ${esc(p?.status || "—")}</div>
+      <div>params: ${esc((p?.params || []).join(", ") || "—")}</div>
+      <div>js: ${esc((p?.js || []).slice(0, 8).join(", ") || "—")}</div>`;
+    return;
+  }
+  detail.innerHTML = `<strong>${esc(displayMapHost(h, mapState.map && mapState.map.base_url))}</strong> ${h.live ? "live" : ""}
+    <div>tech: ${esc((h.tech || []).join(", ") || "—")}</div>
+    <div>ports: ${esc((h.ports || []).join(", ") || "—")}</div>`;
 }
 $("#siteTree").addEventListener("click", async (e) => {
   const tw = e.target.closest(".tree-tw");
@@ -1112,24 +1397,29 @@ $("#siteTree").addEventListener("click", async (e) => {
   if (!row) return;
   $$("#siteTree .tree-row").forEach((r) => r.classList.remove("sel"));
   row.classList.add("sel");
+  const host = row.dataset.host || "";
+  const path = row.dataset.path || "/";
+  fillMapInfo(host, path);
   const id = row.dataset.id;
-  if (!id) return;
+  if (!id) {
+    siteSelectedId = null;
+    $("#siteReq").textContent = "";
+    $("#siteResp").textContent = "";
+    showMapDetailPane("info");
+    return;
+  }
   const data = await api(`/api/history/${id}`);
   siteSelectedId = id;
   $("#siteReq").textContent = data.request_raw || "";
   $("#siteResp").textContent = data.response_raw || data.error || "";
+  showMapDetailPane("req");
 });
 $("#btnSiteToRepeater").addEventListener("click", () => { if (siteSelectedId) flowToTool(siteSelectedId, "repeater"); });
 $("#btnSiteToIntruder").addEventListener("click", () => { if (siteSelectedId) flowToTool(siteSelectedId, "intruder"); });
 $("#btnSiteToScanner").addEventListener("click", () => { if (!siteSelectedId) return; api(`/api/history/${siteSelectedId}`).then((f) => { showView("scanner"); $("#scanRaw").value = f.request_raw || ""; $("#scanScheme").value = f.scheme || "https"; }); });
-$$("#view-target .tabs.small button").forEach((b) => b.addEventListener("click", () => {
-  $$("#view-target .tabs.small button").forEach((x) => x.classList.remove("active")); b.classList.add("active");
-  const req = b.dataset.pane === "req";
-  $("#siteReq").classList.toggle("hidden", !req); $("#siteResp").classList.toggle("hidden", req);
-}));
+$$("#mapDetailTabs button").forEach((b) => b.addEventListener("click", () => showMapDetailPane(b.dataset.pane)));
 $("#siteFilter").addEventListener("input", () => { clearTimeout(window._siteT); window._siteT = setTimeout(renderSiteMap, 200); });
 $("#siteApplyScope").addEventListener("change", renderSiteMap);
-$("#btnSiteRefresh").addEventListener("click", loadSiteMap);
 
 /* Issues */
 const ISSUE_DEFS = [
@@ -1208,7 +1498,7 @@ $("#btnSeqAnalyze").addEventListener("click", async () => {
   await withWork(tr("work.running"), $("#btnSeqAnalyze"), async () => {
     const rep = await api("/api/sequencer/analyze", { method: "POST", body: JSON.stringify({ tokens }) });
     renderSequencer(rep);
-  }).catch((e) => alert(e.message));
+  }).catch((e) => uiFlash(e.message));
 });
 $("#btnSeqClear").addEventListener("click", () => { $("#seqTokens").value = ""; $("#seqResults").innerHTML = `<p class="muted">${tr("seq.results")}</p>`; $("#seqCount").textContent = ""; });
 $("#seqTokens").addEventListener("input", () => {
@@ -1251,7 +1541,7 @@ async function loadOrganizer() {
     org.items = d.items || [];
     org.collections = d.collections || ["inbox"];
     renderOrganizer();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 }
 function renderOrganizer() {
   $("#orgCollections").innerHTML = org.collections.map((c) => `<div class="org-coll-item ${c === org.active ? "active" : ""}" data-c="${esc(c)}">${esc(c)}</div>`).join("");
@@ -1299,7 +1589,7 @@ $("#btnOrgSave").addEventListener("click", async () => {
       highlight: $("#orgHighlight").value, collection: $("#orgMoveColl").value,
     }) });
     loadOrganizer();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 });
 $("#btnOrgDelete").addEventListener("click", async () => {
   if (!org.selectedId) return;
@@ -1307,7 +1597,7 @@ $("#btnOrgDelete").addEventListener("click", async () => {
   try {
     await api(`/api/organizer/${encodeURIComponent(org.selectedId)}`, { method: "DELETE" });
     org.selectedId = null; loadOrganizer();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 });
 $("#btnOrgToRepeater").addEventListener("click", () => {
   const it = org.items.find((x) => x.id === org.selectedId); if (!it) return;
@@ -1324,17 +1614,17 @@ async function sendToOrganizer(requestRaw, responseRaw, tool) {
       request_raw: requestRaw, response_raw: responseRaw || "", tool: tool || "proxy", collection: org.active || "inbox",
     }) });
     if (currentView() === "organizer") loadOrganizer();
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 }
 /* Send-to handlers for Dashboard recent flows and Target site map */
 async function flowToTool(flowId, tool) {
   try {
     const f = await api(`/api/history/${flowId}`);
     const raw = f.request_raw || "";
-    if (!raw) { alert(tr("flow.noReq")); return; }
+    if (!raw) { uiFlash(tr("flow.noReq")); return; }
     if (tool === "repeater") { showView("repeater"); newRepeaterTab(raw); }
     else if (tool === "intruder") { showView("intruder"); newIntruderTab(raw); }
-  } catch (e) { alert(e.message); }
+  } catch (e) { uiFlash(e.message); }
 }
 $("#dRecent").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-act]"); if (!b) return;
@@ -1453,7 +1743,7 @@ $("#btnDiscRun").addEventListener("click", async () => {
   const base = $("#discBase").value.trim();
   const custom = $("#discWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#discWlSelect")?.value || "";
-  if (!base || (custom.length === 0 && !path)) { alert(tr("disc.need")); return; }
+  if (!base || (custom.length === 0 && !path)) { uiFlash(tr("disc.need")); return; }
   $("#discBody").innerHTML = "";
   try {
     const data = await runJob("discover", {
@@ -1471,7 +1761,7 @@ $("#btnDiscRun").addEventListener("click", async () => {
     discCache = data || [];
     renderDisc(discCache);
     $("#discMeta").textContent = tr("disc.nResults", { n: discCache.length });
-  } catch (e) { alert(e.message); $("#discMeta").textContent = ""; }
+  } catch (e) { uiFlash(e.message); $("#discMeta").textContent = ""; }
 });
 function renderDisc(rows) {
   const q = ($("#discFilter").value || "").toLowerCase();
@@ -1610,24 +1900,182 @@ function renderInspector(target, raw) {
   `;
 }
 
-/* Extensions (client-side stub) */
-const extLoaded = [];
-$("#btnExtLoad").addEventListener("click", () => {
-  const name = $("#extPath").value.trim();
-  if (!name) { alert(tr("ext.needPath")); return; }
-  extLoaded.push({ name, version: "1.0", author: "user", status: "loaded", description: tr("ext.stub") });
-  renderExt();
-});
-$("#btnExtUnload").addEventListener("click", () => { extLoaded.pop(); renderExt(); });
-function renderExt() {
-  $("#extBody").innerHTML = extLoaded.length ? extLoaded.map((e) => `<tr>
-    <td>${esc(e.name)}</td><td>${esc(e.version)}</td><td>${esc(e.author)}</td>
-    <td>${esc(e.status)}</td><td>${esc(e.description)}</td>
-  </tr>`).join("") : `<tr><td colspan="5" class="muted">${tr("ext.empty")}</td></tr>`;
+/* Map */
+let mapState = { target: null, catalog: [], stages: [], artifacts: [], map: null, opts: loadStoredMapOpts() };
+
+function loadStoredMapOpts() {
+  try {
+    const raw = localStorage.getItem("aura_map_opts");
+    if (raw) return JSON.parse(raw) || {};
+  } catch (_) {}
+  return {};
 }
 
-/* Map */
-let mapState = { target: null, catalog: [], stages: [], artifacts: [], map: null };
+const MAP_STAGE_DEFAULTS = {
+  subdomains_passive: { timeout_sec: 45, limit: 400 },
+  dns_brute: { timeout_sec: 5, workers: 32, limit: 5000, wordlist: "" },
+  live_hosts: { timeout_sec: 8, https: true, http: true },
+  web_ports: { timeout_sec: 3, ports: "80 443 3000 3001 4000 4443 5000 5001 7001 8000 8008 8080 8081 8443 8888 9000 9090 9443 10443" },
+  tech: { timeout_sec: 10 },
+  urls_passive: { timeout_sec: 45, limit: 400, same_host: true },
+  scrape: { timeout_sec: 12, follow_js: 8, same_host: true },
+  dirs: { timeout_sec: 8, workers: 16, rps: 25, hide: "404", wordlist: "" },
+  params: { timeout_sec: 8, workers: 10, rps: 15, hide: "404", wordlist: "" },
+};
+
+function mapStageOpts(id) {
+  const d = MAP_STAGE_DEFAULTS[id] || {};
+  const s = (mapState.opts && mapState.opts[id]) || {};
+  const out = { ...d, ...s };
+  if (Array.isArray(out.wordlist)) out.wordlist = out.wordlist.join("\n");
+  if (Array.isArray(out.hide)) out.hide = out.hide.join(", ");
+  if (Array.isArray(out.schemes)) {
+    out.https = out.schemes.includes("https");
+    out.http = out.schemes.includes("http");
+  }
+  return out;
+}
+
+function stageField(label, inner) {
+  const wide = String(inner).includes("<textarea") ? " stage-field-wide" : "";
+  return `<label class="stage-field${wide}"><span>${esc(label)}</span>${inner}</label>`;
+}
+
+function mapStageFields(id, busy) {
+  const o = mapStageOpts(id);
+  const dis = busy ? " disabled" : "";
+  const num = (name, val, extra = "") => `<input type="number" name="${name}" value="${esc(val)}"${dis} ${extra}>`;
+  const text = (name, val, extra = "") => `<input type="text" name="${name}" value="${esc(val || "")}"${dis} ${extra}>`;
+  const area = (name, val, ph) => `<textarea name="${name}" rows="4" placeholder="${esc(ph || "")}"${dis}>${esc(val || "")}</textarea>`;
+  const chk = (name, on, lab) => `<label class="check"><input type="checkbox" name="${name}"${on ? " checked" : ""}${dis}/> <span>${esc(lab)}</span></label>`;
+  let fields = "";
+  switch (id) {
+    case "subdomains_passive":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"5\" max=\"120\""))
+        + stageField(tr("map.opt.limit"), num("limit", o.limit, "min=\"10\" max=\"2000\""));
+      break;
+    case "dns_brute":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"1\" max=\"30\""))
+        + stageField(tr("map.opt.workers"), num("workers", o.workers, "min=\"1\" max=\"128\""))
+        + stageField(tr("map.opt.limit"), num("limit", o.limit, "min=\"0\" max=\"20000\""))
+        + stageField(tr("map.opt.seclists"), text("wordlist_path", o.wordlist_path || "", `placeholder="Discovery/DNS/subdomains-top1million-5000.txt"`))
+        + stageField(tr("map.opt.wordlist"), area("wordlist", o.wordlist, tr("map.opt.wordlistDnsPh")));
+      break;
+    case "live_hosts":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"1\" max=\"30\""))
+        + `<div class="stage-checks">${chk("https", o.https !== false, "HTTPS")}${chk("http", o.http !== false, "HTTP")}</div>`;
+      break;
+    case "web_ports":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"1\" max=\"15\""))
+        + stageField(tr("map.opt.ports"), area("ports", o.ports, "80 443 8080 8443"));
+      break;
+    case "tech":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"1\" max=\"30\""));
+      break;
+    case "urls_passive":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"10\" max=\"90\""))
+        + stageField(tr("map.opt.limit"), num("limit", o.limit, "min=\"20\" max=\"2000\""))
+        + `<div class="stage-checks">${chk("same_host", o.same_host !== false, tr("map.opt.sameHost"))}</div>`;
+      break;
+    case "scrape":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"3\" max=\"30\""))
+        + stageField(tr("map.opt.followJs"), num("follow_js", o.follow_js, "min=\"0\" max=\"40\""))
+        + `<div class="stage-checks">${chk("same_host", o.same_host !== false, tr("map.opt.sameHost"))}</div>`;
+      break;
+    case "dirs":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"2\" max=\"30\""))
+        + stageField(tr("map.opt.workers"), num("workers", o.workers, "min=\"1\" max=\"64\""))
+        + stageField(tr("map.opt.rps"), num("rps", o.rps, "min=\"1\" max=\"200\""))
+        + stageField(tr("map.opt.hide"), text("hide", o.hide || "404"))
+        + stageField(tr("map.opt.seclists"), text("wordlist_path", o.wordlist_path || "", `placeholder="Discovery/Web-Content/common.txt"`))
+        + stageField(tr("map.opt.wordlist"), area("wordlist", o.wordlist, tr("map.opt.wordlistDirPh")));
+      break;
+    case "params":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"2\" max=\"30\""))
+        + stageField(tr("map.opt.workers"), num("workers", o.workers, "min=\"1\" max=\"64\""))
+        + stageField(tr("map.opt.rps"), num("rps", o.rps, "min=\"1\" max=\"200\""))
+        + stageField(tr("map.opt.hide"), text("hide", o.hide || "404"))
+        + stageField(tr("map.opt.seclists"), text("wordlist_path", o.wordlist_path || "", `placeholder="Discovery/Web-Content/burp-parameter-names.txt"`))
+        + stageField(tr("map.opt.wordlist"), area("wordlist", o.wordlist, tr("map.opt.wordlistParamPh")));
+      break;
+    default:
+      return "";
+  }
+  return `<fieldset class="stage-fields"${busy ? " disabled" : ""}>${fields}</fieldset>`;
+}
+
+function readStageForm(card) {
+  const el = (n) => card.querySelector(`[name="${n}"]`);
+  const num = (n) => {
+    const node = el(n);
+    if (!node) return undefined;
+    const x = Number(node.value);
+    return Number.isFinite(x) ? x : undefined;
+  };
+  const text = (n) => (el(n)?.value || "").trim();
+  const lines = (n) => text(n).split(/\n/).map((s) => s.trim()).filter(Boolean);
+  const chk = (n) => !!el(n)?.checked;
+  const id = card.dataset.stage;
+  const o = {};
+  switch (id) {
+    case "subdomains_passive":
+      o.timeout_sec = num("timeout_sec");
+      o.limit = num("limit");
+      break;
+    case "dns_brute":
+      o.timeout_sec = num("timeout_sec");
+      o.workers = num("workers");
+      o.limit = num("limit");
+      o.wordlist = lines("wordlist");
+      o.wordlist_path = text("wordlist_path");
+      break;
+    case "live_hosts":
+      o.timeout_sec = num("timeout_sec");
+      o.schemes = [];
+      if (chk("https")) o.schemes.push("https");
+      if (chk("http")) o.schemes.push("http");
+      if (!o.schemes.length) o.schemes = ["https", "http"];
+      break;
+    case "web_ports":
+      o.timeout_sec = num("timeout_sec");
+      o.ports = text("ports");
+      break;
+    case "tech":
+      o.timeout_sec = num("timeout_sec");
+      break;
+    case "urls_passive":
+      o.timeout_sec = num("timeout_sec");
+      o.limit = num("limit");
+      o.same_host = chk("same_host");
+      break;
+    case "scrape":
+      o.timeout_sec = num("timeout_sec");
+      o.follow_js = num("follow_js");
+      o.same_host = chk("same_host");
+      break;
+    case "dirs":
+    case "params":
+      o.timeout_sec = num("timeout_sec");
+      o.workers = num("workers");
+      o.rps = num("rps");
+      o.wordlist = lines("wordlist");
+      o.wordlist_path = text("wordlist_path");
+      o.hide = text("hide").split(/[,\s]+/).map(Number).filter((n) => n > 0);
+      break;
+  }
+  return o;
+}
+
+function collectMapOpts() {
+  const out = { ...(mapState.opts || {}) };
+  $$("#view-map .map-stage-page[data-stage]").forEach((card) => {
+    if (!card.dataset.stage) return;
+    out[card.dataset.stage] = { ...(out[card.dataset.stage] || {}), ...readStageForm(card) };
+  });
+  mapState.opts = out;
+  try { localStorage.setItem("aura_map_opts", JSON.stringify(out)); } catch (_) {}
+  return out;
+}
 
 async function loadMap() {
   const skipIngest = anyMapRunning();
@@ -1674,7 +2122,10 @@ let mapIngestTimer = null;
 function scheduleMapIngest() {
   if (anyMapRunning()) return;
   if (!mapState.target) {
-    if (!$("#mapWork") || $("#mapWork").classList.contains("hidden")) suggestMapFromProxy();
+    if (!$("#mapWork") || $("#mapWork").classList.contains("hidden")) {
+      loadSiteMap();
+      suggestMapFromProxy();
+    }
     return;
   }
   clearTimeout(mapIngestTimer);
@@ -1752,7 +2203,7 @@ const MapLog = {
     if (this.items.length > this.max) this.items.splice(0, this.items.length - this.max);
     if (ev && ev.stage) this.last[ev.stage] = line;
     this.render();
-    const live = ev && ev.stage ? document.querySelector(`.stage-card[data-stage="${ev.stage}"] .stage-live`) : null;
+    const live = ev && ev.stage ? document.querySelector(`.map-stage-page[data-stage="${ev.stage}"] .stage-live`) : null;
     if (live) live.textContent = line;
     if (Jobs.prefix("map:").length) setWork(line);
   },
@@ -1767,24 +2218,28 @@ const MapLog = {
     el.dataset.empty = tr("map.logIdle");
     el.textContent = this.items.map((x) => x.line).join("\n");
     el.scrollTop = el.scrollHeight;
+    $$(".map-stage-log").forEach((pre) => {
+      const id = pre.closest("[data-stage]")?.dataset.stage;
+      pre.textContent = this.items.filter((x) => x.stage === id).map((x) => x.line).join("\n");
+      pre.scrollTop = pre.scrollHeight;
+    });
   },
 };
 
 function clearMapWorkspace() {
-  mapState = { target: null, catalog: [], stages: [], artifacts: [], map: null };
+  const opts = mapState.opts || loadStoredMapOpts();
+  mapState = { target: null, catalog: mapState.catalog || [], stages: [], artifacts: [], map: null, opts };
   try {
     localStorage.removeItem("aura_map_id");
     localStorage.removeItem("meb_map_id");
   } catch (_) {}
-  $("#mapEmpty")?.classList.remove("hidden");
-  $("#mapWork")?.classList.add("hidden");
   if ($("#mapStats")) $("#mapStats").innerHTML = "";
-  if ($("#mapStages")) $("#mapStages").innerHTML = "";
-  if ($("#mapTree")) $("#mapTree").innerHTML = "";
   if ($("#mapMeta")) $("#mapMeta").textContent = "";
   const detail = $("#mapDetail");
   if (detail) detail.textContent = tr("map.pickNode");
   MapLog.clear();
+  renderMapStagePanes();
+  renderSiteMap();
   suggestMapFromProxy();
 }
 
@@ -1797,11 +2252,64 @@ function displayMapHost(h, base) {
   return host;
 }
 
+function mapCatalog() {
+  if (mapState.catalog && mapState.catalog.length) return mapState.catalog;
+  return ["subdomains_passive", "dns_brute", "live_hosts", "web_ports", "tech", "urls_passive", "scrape", "dirs", "params"]
+    .map((id) => ({ id, mode: id === "subdomains_passive" || id === "tech" || id === "urls_passive" ? "passive" : "active" }));
+}
+
+function syncMapSubtabBusy() {
+  $$("#mapSubtabs button[data-sub]").forEach((b) => {
+    const id = b.dataset.sub;
+    if (id === "sitemap" || id === "target") return;
+    const running = Jobs.running(mapJobId(id));
+    b.classList.toggle("is-busy", running);
+  });
+}
+
+function renderMapStagePanes() {
+  collectMapOpts();
+  const byId = Object.fromEntries((mapState.stages || []).map((s) => [s.id, s]));
+  const catalog = mapCatalog();
+  catalog.forEach((c, i) => {
+    const host = document.querySelector(`#view-map .map-stage-page[data-stage="${c.id}"]`);
+    if (!host) return;
+    const s = byId[c.id] || { status: "idle" };
+    const busy = s.status === "running" || Jobs.running(mapJobId(c.id));
+    const status = busy ? "running" : (s.status || "idle");
+    const stKey = "map.status." + status;
+    let summary = s.summary || "";
+    if (summary === "stopped" || summary === "остановлено") summary = tr("work.stopped");
+    if (summary && !busy) summary = clipText(summary, 220);
+    const live = busy ? (MapLog.lastFor(c.id) || tr("map.stageWork." + c.id)) : "";
+    const ready = !!mapState.target;
+    host.className = `map-stage-page ${status}`;
+    host.innerHTML = `
+      <div class="stage-head">
+        <h2>${i + 1}. ${esc(tr("stage." + c.id + ".title"))}</h2>
+        <span class="stage-mode ${c.mode}">${c.mode === "active" ? tr("map.modeActive") : tr("map.modePassive")} · ${esc(tr(stKey))}</span>
+      </div>
+      <p class="map-stage-hint">${esc(tr("stage." + c.id + ".hint"))}</p>
+      ${!ready ? `<p class="muted">${esc(tr("map.needStart"))}</p>` : ""}
+      ${mapStageFields(c.id, busy || !ready)}
+      ${summary && !busy ? `<p>${esc(summary)}</p>` : ""}
+      ${busy ? `<p class="stage-live">${esc(live)}</p>` : ""}
+      ${busy ? `<div class="stage-progress" aria-hidden="true"><span></span></div>` : ""}
+      <div class="toolbar job-actions">
+        <button type="button" class="primary${busy ? " is-busy" : ""}" data-run="${c.id}" ${busy || !ready ? "disabled" : ""}>${busy ? `<span class="spin"></span>${tr("map.running")}` : tr("map.run")}</button>
+        <button type="button" class="danger" data-stop="${c.id}" ${busy ? "" : "disabled"}>${tr("map.stop")}</button>
+        ${c.id === "dirs" ? `<button type="button" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
+        ${c.id === "params" ? `<button type="button" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
+      </div>
+      <pre class="map-log map-stage-log" data-empty="${esc(tr("map.logIdle"))}"></pre>`;
+  });
+  syncMapSubtabBusy();
+  MapLog.render();
+}
+
 function renderMapSnapshot(data) {
-  mapState = { ...mapState, ...data, target: data.target };
+  mapState = { ...mapState, ...data, target: data.target, opts: mapState.opts };
   if (data.target?.id) localStorage.setItem("aura_map_id", data.target.id);
-  $("#mapEmpty").classList.toggle("hidden", !!data.target);
-  $("#mapWork").classList.toggle("hidden", !data.target);
   if (!data.target) {
     clearMapWorkspace();
     return;
@@ -1821,34 +2329,8 @@ function renderMapSnapshot(data) {
     ["JS", st.js ?? 0],
     ["URL", st.urls ?? 0],
   ].map(([k, v]) => `<div class="map-stat"><b>${v}</b><span>${k}</span></div>`).join("");
-  const byId = Object.fromEntries((data.stages || []).map((s) => [s.id, s]));
-  $("#mapStages").innerHTML = (data.catalog || []).map((c, i) => {
-    const s = byId[c.id] || { status: "idle" };
-    const busy = s.status === "running" || Jobs.running(mapJobId(c.id));
-    const status = busy ? "running" : (s.status || "idle");
-    const stKey = "map.status." + status;
-    let summary = s.summary || "";
-    if (summary === "stopped" || summary === "остановлено") summary = tr("work.stopped");
-    if (summary && !busy) summary = clipText(summary, 160);
-    const live = busy ? (MapLog.lastFor(c.id) || tr("map.stageWork." + c.id)) : "";
-    return `<article class="stage-card ${status}" data-stage="${c.id}">
-      <div class="stage-head">
-        <h3>${i + 1}. ${esc(tr("stage." + c.id + ".title"))}</h3>
-        <span class="stage-mode ${c.mode}">${c.mode === "active" ? tr("map.modeActive") : tr("map.modePassive")} · ${esc(tr(stKey))}</span>
-      </div>
-      <p>${esc(tr("stage." + c.id + ".hint"))}</p>
-      ${summary && !busy ? `<p>${esc(summary)}</p>` : ""}
-      ${busy ? `<p class="stage-live">${esc(live)}</p>` : ""}
-      ${busy ? `<div class="stage-progress" aria-hidden="true"><span></span></div>` : ""}
-      <div class="toolbar job-actions">
-        <button type="button" class="primary mini${busy ? " is-busy" : ""}" data-run="${c.id}" ${busy ? "disabled" : ""}>${busy ? `<span class="spin"></span>${tr("map.running")}` : tr("map.run")}</button>
-        <button type="button" class="mini danger" data-stop="${c.id}" ${busy ? "" : "disabled"}>${tr("map.stop")}</button>
-        ${c.id === "dirs" ? `<button type="button" class="mini" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
-        ${c.id === "params" ? `<button type="button" class="mini" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
-      </div>
-    </article>`;
-  }).join("");
-  renderAppMap(data.map);
+  renderMapStagePanes();
+  renderSiteMap();
   requestAnimationFrame(() => {
     if (UILayout && UILayout.refresh) UILayout.refresh();
     MapLog.render();
@@ -1856,32 +2338,8 @@ function renderMapSnapshot(data) {
 }
 
 function renderAppMap(m) {
-  const tree = $("#mapTree");
-  const hosts = m?.hosts || [];
-  if (!hosts.length) {
-    tree.innerHTML = `<div class="muted" style="padding:12px">${tr("map.emptyTree")}</div>`;
-    return;
-  }
-  tree.innerHTML = hosts.map((h) => {
-    const label = displayMapHost(h, m.base_url);
-    const paths = (h.paths || []).map((p) => {
-      let path = p.path || "/";
-      if (path !== "/" && !path.startsWith("/")) path = "/" + path;
-      const bits = [p.status, (p.params || []).length ? `params ${(p.params || []).join(", ")}` : ""].filter(Boolean).join(" · ");
-      return `<div class="tree-row tree-leaf" data-host="${esc(h.host)}" data-path="${esc(path)}">
-        <span class="tree-path">${esc(path)}</span>
-        <span class="tree-status">${esc(bits)}</span>
-      </div>`;
-    }).join("");
-    return `<div class="tree-node">
-      <div class="tree-row" data-host="${esc(h.host)}">
-        <span class="tree-icon">${h.live ? "●" : "○"}</span>
-        <strong>${esc(label)}</strong>
-        <span class="tree-status">${esc((h.tech || []).join(", "))}</span>
-      </div>
-      <div class="tree-children">${paths || `<div class="muted" style="padding:4px 12px">${tr("map.noPaths")}</div>`}</div>
-    </div>`;
-  }).join("");
+  if (m) mapState.map = m;
+  renderSiteMap();
 }
 
 $("#mapTarget")?.addEventListener("input", () => {
@@ -1916,7 +2374,8 @@ $("#mapForm").addEventListener("submit", async (e) => {
       renderMapSnapshot(ing);
     } catch (_) {}
     $("#mapMeta").textContent = tr("map.startedOk", { host: data.target.base_url || data.target.domain || "", n });
-  } catch (err) { alert(err.message); }
+    showSub("#view-map", "sitemap");
+  } catch (err) { uiFlash(err.message); }
   finally {
     markBusy(startBtn, false);
     Jobs.syncBar();
@@ -1929,7 +2388,13 @@ $("#mapProxyHosts")?.addEventListener("click", (e) => {
   $("#mapAuth").checked = true;
   $("#mapForm").requestSubmit();
 });
-$("#mapStages").addEventListener("click", async (e) => {
+$("#view-map").addEventListener("change", (e) => {
+  if (e.target.closest(".map-stage-page")) collectMapOpts();
+});
+$("#view-map").addEventListener("input", (e) => {
+  if (e.target.closest(".map-stage-page")) collectMapOpts();
+});
+$("#view-map").addEventListener("click", async (e) => {
   const jump = e.target.closest("[data-jump]");
   if (jump) { showView(jump.dataset.jump); return; }
   const stop = e.target.closest("[data-stop]");
@@ -1947,6 +2412,8 @@ $("#mapStages").addEventListener("click", async (e) => {
   const stageId = btn.dataset.run;
   const jobId = mapJobId(stageId);
   if (Jobs.running(jobId)) return;
+  collectMapOpts();
+  const opts = { ...(mapState.opts && mapState.opts[stageId]) || {} };
   const hint = tr("map.stageWork." + stageId);
   const label = hint && hint !== "map.stageWork." + stageId ? hint : tr("map.stageWorking");
   const signal = Jobs.start(jobId, label);
@@ -1954,7 +2421,11 @@ $("#mapStages").addEventListener("click", async (e) => {
   mapState.stages = [...(mapState.stages || []).filter((s) => s.id !== stageId), { id: stageId, status: "running", summary: "" }];
   renderMapSnapshot(mapState);
   try {
-    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${stageId}`, { method: "POST", signal });
+    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${stageId}`, {
+      method: "POST",
+      signal,
+      body: JSON.stringify(opts),
+    });
     Jobs.finish(jobId);
     renderMapSnapshot(data);
     if (data.stopped) $("#mapMeta").textContent = tr("work.stopped");
@@ -1978,7 +2449,7 @@ $("#mapStages").addEventListener("click", async (e) => {
       }
       return;
     }
-    alert(err.message);
+    uiFlash(err.message);
     MapLog.append({ stage: stageId, action: "err", err: err.message });
     mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "error", summary: err.message } : s);
     renderMapSnapshot(mapState);
@@ -1988,30 +2459,15 @@ $("#btnMapHistory").addEventListener("click", async () => {
   if (!mapState.target) return;
   await withWork(tr("work.history"), $("#btnMapHistory"), async () => {
     renderMapSnapshot(await api(`/api/intel/targets/${mapState.target.id}/ingest-history`, { method: "POST" }));
-  }).catch((err) => alert(err.message));
+  }).catch((err) => uiFlash(err.message));
 });
 $("#btnMapRefresh").addEventListener("click", async () => {
-  await withWork(tr("work.history"), $("#btnMapRefresh"), loadMap).catch((err) => alert(err.message));
+  await withWork(tr("work.history"), $("#btnMapRefresh"), async () => {
+    await loadSiteMap();
+    await loadMap();
+  }).catch((err) => uiFlash(err.message));
 });
 $("#btnMapLogClear")?.addEventListener("click", () => MapLog.clear());
-$("#mapTree").addEventListener("click", (e) => {
-  const row = e.target.closest("[data-host]");
-  if (!row) return;
-  const host = row.dataset.host;
-  const path = row.dataset.path;
-  const h = (mapState.map?.hosts || []).find((x) => x.host === host);
-  if (!h) return;
-  if (path) {
-    const p = (h.paths || []).find((x) => x.path === path);
-    $("#mapDetail").innerHTML = `<strong>${esc(host)}${esc(path)}</strong><div>status ${esc(p?.status || "—")}</div>
-      <div>params: ${esc((p?.params || []).join(", ") || "—")}</div>
-      <div>js: ${esc((p?.js || []).slice(0, 8).join(", ") || "—")}</div>`;
-    return;
-  }
-  $("#mapDetail").innerHTML = `<strong>${esc(host)}</strong> ${h.live ? "live" : ""}
-    <div>tech: ${esc((h.tech || []).join(", ") || "—")}</div>
-    <div>ports: ${esc((h.ports || []).join(", ") || "—")}</div>`;
-});
 
 $("#btnDiscBuiltin")?.addEventListener("click", async () => {
   const w = await api("/api/wordlists");
@@ -2070,7 +2526,8 @@ $("#btnFuzzRun")?.addEventListener("click", async () => {
 
 function refreshTranslatedUI() {
   try { renderPending(); } catch (_) {}
-  try { if (typeof mapState !== "undefined" && mapState.target) renderMapSnapshot(mapState); } catch (_) {}
+  try { if (typeof mapState !== "undefined" && mapState.target) renderMapSnapshot(mapState); else if (typeof renderMapStagePanes === "function") renderMapStagePanes(); } catch (_) {}
+  try { if (typeof renderSiteMap === "function" && !(mapState && mapState.target)) renderSiteMap(); } catch (_) {}
   try { if (typeof MapLog !== "undefined") MapLog.render(); } catch (_) {}
   try { renderMr(); } catch (_) {}
   try { renderScope(); } catch (_) {}
@@ -2083,16 +2540,18 @@ function refreshTranslatedUI() {
   const insp = $("#repInspector");
   const req = $("#repReq");
   if (insp && req) renderInspector(insp, req.value);
+  try { UILayout.syncLockButton(); } catch (_) {}
+  try { if ($("#mainTabs")) $("#mainTabs").title = (UILayout.data && UILayout.data.uiLocked) ? "" : tr("set.dragTabs"); } catch (_) {}
 }
 
 /* Init */
 try { UILayout.init(); } catch (e) { DebugLog.log({ level: "error", module: "ui", action: "layout", msg: String(e) }); }
 try { applyLang(detectLang()); } catch (_) { applyLang("en"); }
-try { MapLog.render(); } catch (_) {}
+try { MapLog.render(); renderMapStagePanes(); } catch (_) {}
 $$("#themeSwitch button").forEach((b) => b.addEventListener("click", () => applyTheme(b.dataset.theme)));
 $$("#langSwitch button").forEach((b) => b.addEventListener("click", () => applyLang(b.dataset.lang)));
 (function bootView() {
-  const allowed = new Set($$("#mainTabs button").map((b) => b.dataset.view));
+  const allowed = new Set($$("#mainTabs button").filter((b) => !b.hidden && !b.classList.contains("hidden")).map((b) => b.dataset.view));
   const last = UILayout.data && UILayout.data.lastView;
   showView(allowed.has(last) ? last : "map");
   const sub = UILayout.data && UILayout.data.lastProxySub;

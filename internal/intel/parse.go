@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -85,6 +86,115 @@ func OriginURL(raw string) string {
 	return joinBase(scheme, strings.ToLower(u.Hostname()), u.Port(), "/", "")
 }
 
+// extraPortFromBase returns a non-default port from a target URL (e.g. 16126).
+func extraPortFromBase(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u == nil {
+		return ""
+	}
+	p := u.Port()
+	if p == "" || p == defaultPort(u.Scheme) {
+		return ""
+	}
+	return p
+}
+
+func defaultWebPorts() []string {
+	return []string{
+		"80", "443", "3000", "3001", "4000", "4443", "5000", "5001",
+		"7001", "8000", "8008", "8080", "8081", "8443", "8888",
+		"9000", "9090", "9443", "10443",
+	}
+}
+
+func parsePortList(raw string) []string {
+	raw = strings.ReplaceAll(raw, ",", " ")
+	raw = strings.ReplaceAll(raw, ";", " ")
+	raw = strings.ReplaceAll(raw, "\n", " ")
+	var out []string
+	seen := map[string]struct{}{}
+	for _, p := range strings.Fields(raw) {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		n, err := strconv.Atoi(p)
+		if err != nil || n < 1 || n > 65535 {
+			continue
+		}
+		s := strconv.Itoa(n)
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
+func webPortList(base string, custom ...string) []string {
+	ports := defaultWebPorts()
+	if len(custom) > 0 && strings.TrimSpace(custom[0]) != "" {
+		if parsed := parsePortList(custom[0]); len(parsed) > 0 {
+			ports = parsed
+		}
+	}
+	extra := extraPortFromBase(base)
+	if extra == "" {
+		return ports
+	}
+	out := []string{extra}
+	for _, p := range ports {
+		if p != extra {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+func webProbeURLs(host, port, base string) []string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	var out []string
+	add := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		for _, x := range out {
+			if x == raw {
+				return
+			}
+		}
+		out = append(out, raw)
+	}
+	if u, err := url.Parse(strings.TrimSpace(base)); err == nil && u != nil {
+		if strings.EqualFold(u.Hostname(), host) {
+			bp := u.Port()
+			if bp == "" {
+				bp = defaultPort(u.Scheme)
+			}
+			if bp == port {
+				if origin := OriginURL(base); origin != "" {
+					add(strings.TrimRight(origin, "/") + "/")
+				}
+			}
+		}
+	}
+	httpsURL := "https://" + net.JoinHostPort(host, port) + "/"
+	httpURL := "http://" + net.JoinHostPort(host, port) + "/"
+	switch port {
+	case "443", "8443":
+		add(httpsURL)
+	case "80", "8080", "8000", "8008":
+		add(httpURL)
+		add(httpsURL)
+	default:
+		add(httpsURL)
+		add(httpURL)
+	}
+	return out
+}
+
 type simpleError string
 
 func (e simpleError) Error() string { return string(e) }
@@ -126,9 +236,6 @@ func parseCRTNames(body []byte, domain string) []string {
 			add(part)
 		}
 		add(r.Common)
-	}
-	if len(out) > 200 {
-		out = out[:200]
 	}
 	return out
 }

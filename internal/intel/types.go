@@ -65,6 +65,67 @@ type CatalogStage struct {
 	Mode  string `json:"mode"`
 }
 
+// StageOptions are per-module scan settings sent with Run.
+type StageOptions struct {
+	TimeoutSec   int      `json:"timeout_sec,omitempty"`
+	Limit        int      `json:"limit,omitempty"`
+	SameHost     *bool    `json:"same_host,omitempty"`
+	Ports        string   `json:"ports,omitempty"`
+	Wordlist     []string `json:"wordlist,omitempty"`
+	WordlistPath string   `json:"wordlist_path,omitempty"`
+	Workers      int      `json:"workers,omitempty"`
+	RPS          int      `json:"rps,omitempty"`
+	FollowJS     int      `json:"follow_js,omitempty"`
+	Schemes      []string `json:"schemes,omitempty"`
+	Hide         []int    `json:"hide,omitempty"`
+}
+
+func (o StageOptions) timeout(def int) int {
+	if o.TimeoutSec > 0 {
+		return o.TimeoutSec
+	}
+	return def
+}
+
+func (o StageOptions) limit(def, max int) int {
+	n := o.Limit
+	if n <= 0 {
+		n = def
+	}
+	if max > 0 && n > max {
+		return max
+	}
+	return n
+}
+
+func (o StageOptions) sameHost() bool {
+	if o.SameHost == nil {
+		return true
+	}
+	return *o.SameHost
+}
+
+func (o StageOptions) workers(def int) int {
+	if o.Workers > 0 {
+		return o.Workers
+	}
+	return def
+}
+
+func (o StageOptions) rps(def int) int {
+	if o.RPS > 0 {
+		return o.RPS
+	}
+	return def
+}
+
+func (o StageOptions) followJS(def int) int {
+	if o.FollowJS > 0 {
+		return o.FollowJS
+	}
+	return def
+}
+
 // HostNode is one host in the application map.
 type HostNode struct {
 	Host  string     `json:"host"`

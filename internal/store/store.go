@@ -424,6 +424,20 @@ func (s *Store) RecordHistory() bool {
 	return s.Settings.RecordHistory
 }
 
+func (s *Store) UIListen() (string, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	host := s.Settings.UIHost
+	port := s.Settings.UIPort
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if port == 0 {
+		port = 1337
+	}
+	return host, port
+}
+
 func (s *Store) ApplySettings(patch map[string]any) (restart bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

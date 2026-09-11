@@ -51,8 +51,18 @@ func Run(ctx context.Context, opts Options, log *zap.Logger) ([]Result, error) {
 	if opts.Workers < 1 {
 		opts.Workers = 10
 	}
+	if opts.Workers > 30 {
+		opts.Workers = 30
+	}
 	if opts.RPS < 1 {
 		opts.RPS = 20
+	}
+	if opts.RPS > 50 {
+		opts.RPS = 50
+	}
+	const maxWordlist = 50000
+	if len(opts.Wordlist) > maxWordlist {
+		opts.Wordlist = opts.Wordlist[:maxWordlist]
 	}
 	if opts.Timeout <= 0 {
 		opts.Timeout = 10 * time.Second

@@ -241,7 +241,14 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 			return nil, fmt.Errorf("one-position mode requires exactly 1 payload set, got %d", len(sets))
 		}
 		set := sets[0]
-		out := make([][]string, 0, positions*len(set))
+		n := positions * len(set)
+		if positions > 0 && n/positions != len(set) {
+			return nil, fmt.Errorf("too many combinations, max %d", MaxCombinations)
+		}
+		if n > MaxCombinations {
+			return nil, fmt.Errorf("too many combinations (%d), max %d", n, MaxCombinations)
+		}
+		out := make([][]string, 0, n)
 		for pos := 0; pos < positions; pos++ {
 			for _, p := range set {
 				combo := make([]string, positions)
@@ -255,6 +262,9 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 			return nil, fmt.Errorf("same-value mode requires exactly 1 payload set, got %d", len(sets))
 		}
 		set := sets[0]
+		if len(set) > MaxCombinations {
+			return nil, fmt.Errorf("too many combinations (%d), max %d", len(set), MaxCombinations)
+		}
 		out := make([][]string, 0, len(set))
 		for _, p := range set {
 			combo := make([]string, positions)
@@ -274,6 +284,9 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 				minLen = len(s)
 			}
 		}
+		if minLen > MaxCombinations {
+			return nil, fmt.Errorf("too many combinations (%d), max %d", minLen, MaxCombinations)
+		}
 		out := make([][]string, 0, minLen)
 		for i := 0; i < minLen; i++ {
 			combo := make([]string, positions)
@@ -286,6 +299,14 @@ func attackCombinations(attackType string, positions int, sets [][]string) ([][]
 	case "combo":
 		if len(sets) != positions {
 			return nil, fmt.Errorf("combinations mode requires %d payload sets (one per position), got %d", positions, len(sets))
+		}
+		n, overflow := combinationCount(sets)
+		if overflow || n > MaxCombinations {
+			shown := n
+			if overflow {
+				shown = -1
+			}
+			return nil, fmt.Errorf("too many combinations (%d), max %d — use paired mode or smaller sets", shown, MaxCombinations)
 		}
 		return GenerateCombinations(sets), nil
 	default:

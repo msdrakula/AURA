@@ -24,10 +24,6 @@ import (
 	"meb/internal/wordlist"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
-
 // History is the persistent session log shown in the UI.
 type History interface {
 	GetTransactions(limit, offset int) ([]models.HTTPTransaction, error)
@@ -138,7 +134,7 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("GET /api/ws", s.ws)
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.Handle("GET /static/", noStore(http.StripPrefix("/static/", http.FileServer(http.Dir(filepath.Join(opts.WebDir, "static"))))))
-	return withDebug(mux)
+	return withDebug(s.guard(mux))
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -384,6 +380,9 @@ func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ws(w http.ResponseWriter, r *http.Request) {
+	upgrader := websocket.Upgrader{
+		CheckOrigin: func(req *http.Request) bool { return s.originOK(req) },
+	}
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return

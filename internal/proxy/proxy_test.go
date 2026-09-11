@@ -140,6 +140,55 @@ func TestProxyHTTPForward(t *testing.T) {
 	assert.Empty(t, st.History())
 }
 
+func TestProxyRespectsRecordHistoryFalse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("world"))
+	}))
+	t.Cleanup(upstream.Close)
+
+	st := store.New()
+	st.Settings.ListenHost = "127.0.0.1"
+	st.Settings.ListenPort = 0
+	st.Settings.RecordHistory = false
+	db := &storage.Store{}
+	require.NoError(t, db.Init(filepath.Join(t.TempDir(), "session.db")))
+	t.Cleanup(func() { _ = db.Close() })
+
+	px := New(Options{
+		Runtime:  st,
+		History:  db,
+		Findings: db,
+		Analyzer: analyzer.DefaultEngine(),
+		Certs:    certs.NewAuthority(t.TempDir()),
+		Log:      zap.NewNop(),
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	require.NoError(t, px.Start(ctx))
+	t.Cleanup(func() { _ = px.Stop(context.Background()) })
+
+	proxyURL, err := url.Parse("http://" + px.Addr())
+	require.NoError(t, err)
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+		},
+	}
+	resp, err := client.Get(upstream.URL + "/hello")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, "world", string(body))
+
+	time.Sleep(50 * time.Millisecond)
+	hist, err := db.GetTransactions(10, 0)
+	require.NoError(t, err)
+	assert.Empty(t, hist)
+}
+
 func TestProxySaveErrorsDoNotBreakForward(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("ok"))

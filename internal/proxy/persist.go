@@ -13,16 +13,29 @@ import (
 )
 
 func (s *Server) finish(id string, req *httpio.Request, resp *httpio.Response, started time.Time, comment string) {
-	if s.history != nil {
+	if s.shouldRecordHistory() && s.history != nil {
 		tx := transactionFrom(id, req, resp, started, comment)
 		if err := s.history.SaveTransaction(tx); err != nil {
 			s.log.Error("save transaction", zap.Error(err), zap.String("id", id))
 		}
 	}
-	if resp != nil && s.analyzer != nil {
+	if s.shouldRecordHistory() && resp != nil && s.analyzer != nil {
 		s.analyzer.Persist(s.log, s.findings, id, req, resp)
 	}
 	logProxyFlow(id, req, resp, started, comment)
+}
+
+func (s *Server) shouldRecordHistory() bool {
+	if s.rt == nil {
+		return true
+	}
+	type historyGate interface {
+		RecordHistory() bool
+	}
+	if g, ok := s.rt.(historyGate); ok {
+		return g.RecordHistory()
+	}
+	return true
 }
 
 func logProxyFlow(id string, req *httpio.Request, resp *httpio.Response, started time.Time, comment string) {

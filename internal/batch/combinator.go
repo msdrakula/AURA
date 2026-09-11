@@ -1,25 +1,17 @@
 package batch
 
+const MaxCombinations = 20000
+
 // GenerateCombinations returns the cartesian product of the input sets.
 // Each combination has the same length as input. An empty input, or any
-// empty inner slice, yields an empty result.
+// empty inner slice, yields an empty result. Overflow returns empty
+// (attackCombinations rejects oversized products before calling this).
 func GenerateCombinations(input [][]string) [][]string {
-	if len(input) == 0 {
+	n, overflow := combinationCount(input)
+	if overflow || n == 0 {
 		return [][]string{}
 	}
-	total := 1
-	for _, set := range input {
-		if len(set) == 0 {
-			return [][]string{}
-		}
-		next := total * len(set)
-		if len(set) > 0 && next/len(set) != total {
-			return [][]string{}
-		}
-		total = next
-	}
-
-	out := make([][]string, 0, total)
+	out := make([][]string, 0, n)
 	idx := make([]int, len(input))
 	for {
 		combo := make([]string, len(input))
@@ -42,4 +34,22 @@ func GenerateCombinations(input [][]string) [][]string {
 		}
 	}
 	return out
+}
+
+func combinationCount(sets [][]string) (n int, overflow bool) {
+	if len(sets) == 0 {
+		return 0, false
+	}
+	n = 1
+	for _, set := range sets {
+		if len(set) == 0 {
+			return 0, false
+		}
+		next := n * len(set)
+		if next/len(set) != n {
+			return 0, true
+		}
+		n = next
+	}
+	return n, false
 }

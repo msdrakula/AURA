@@ -85,6 +85,27 @@ func TestBatchExecuteValidation(t *testing.T) {
 	}
 }
 
+func TestBatchExecuteTooManyCombinations(t *testing.T) {
+	t.Parallel()
+	handler := New(Options{Runtime: store.New(), Batch: batch.NewEngine(1, 1), Log: zap.NewNop()})
+	set := make([]string, 200)
+	for i := range set {
+		set[i] = "a"
+	}
+	body, err := json.Marshal(BatchExecuteRequest{
+		TemplateRaw: "GET /?x=§a§&y=§b§ HTTP/1.1\r\nHost: x\r\n\r\n",
+		Scheme:      "http",
+		AttackType:  "combo",
+		PayloadSets: [][]string{set, set},
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/batch/execute", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	require.Equal(t, 400, rec.Code, rec.Body.String())
+	require.Contains(t, rec.Body.String(), "too many combinations")
+}
+
 func TestCallbackEndpoint(t *testing.T) {
 	t.Parallel()
 

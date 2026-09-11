@@ -72,7 +72,7 @@ func resolveUnder(root, p string) (string, error) {
 }
 
 func uiURL(host string, port int) string {
-	return "http://" + net.JoinHostPort(host, fmt.Sprintf("%d", port)) + "/?v=44"
+	return "http://" + net.JoinHostPort(host, fmt.Sprintf("%d", port)) + "/?v=55"
 }
 
 func init() {
