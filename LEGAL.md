@@ -1,5 +1,8 @@
 # Independence notice
 
+AURA is licensed under [PolyForm Noncommercial 1.0.0](LICENSE). Personal and noncommercial use only; companies need a written license — see [LICENSE-NOTES.md](LICENSE-NOTES.md).
+
+
 AURA (Advanced URL and Request Analyzer) is an independent intercepting proxy and recon map. It is **not** affiliated with, endorsed by, or derived from PortSwigger Ltd or Burp Suite.
 
 - AURA does not include PortSwigger source code, binaries, icons, or documentation.

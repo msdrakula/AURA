@@ -1,6 +1,6 @@
 # AURA architecture
 
-Independent local intercepting proxy plus a guided application map (Advanced URL and Request Analyzer). Not affiliated with PortSwigger — see `LEGAL.md`.
+Independent local intercepting proxy plus a guided application map (Advanced URL and Request Analyzer). Not affiliated with PortSwigger — see `LEGAL.md`. Source-available under PolyForm Noncommercial 1.0.0 (`LICENSE`).
 
 ## Layout
 

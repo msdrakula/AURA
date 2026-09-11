@@ -16,7 +16,8 @@
 <p align="center">
   <a href="#en">English</a> ·
   <a href="#ru">Русский</a> ·
-  <a href="ARCHITECTURE.md">Architecture</a>
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="LICENSE">License</a>
 </p>
 
 ---
@@ -93,6 +94,10 @@ Discover / Fuzz / Map pick files from disk. Built-in short lists work without Se
 
 `--window=false` serves the UI in a normal browser tab.
 
+### License
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — personal / noncommercial use. Companies and paid work need written permission. Plain language: [LICENSE-NOTES.md](LICENSE-NOTES.md).
+
 ---
 
 <a id="ru"></a>
@@ -162,3 +167,7 @@ CGO_ENABLED=1 go build -o aura ./cmd/server
 Это не «секрет продукта», это **ваши** ключи и трафик с этого компьютера. Дома AURA создаст свои.
 
 Прокси работает по **HTTP/1.1**.
+
+### Лицензия
+
+[PolyForm Noncommercial 1.0.0](LICENSE) — для себя и некоммерции. Компаниям и платной работе нужно письменное разрешение. Простыми словами: [LICENSE-NOTES.md](LICENSE-NOTES.md).
