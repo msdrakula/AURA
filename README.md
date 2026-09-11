@@ -1,69 +1,168 @@
-# AURA
+<p align="center">
+  <img src="web/static/aura-icon.svg" width="88" height="88" alt="AURA">
+</p>
 
-**AURA** — Advanced URL and Request Analyzer  
-**AURA** — Продвинутый анализатор URL и запросов
+<h1 align="center">AURA</h1>
 
-Локальный прокси и карта цели: разведка по шагам, history, intercept, повтор запроса, fuzz.
+<p align="center">
+  <strong>Advanced URL and Request Analyzer</strong><br>
+  Продвинутый анализатор URL и запросов
+</p>
 
-Независимый проект. Не связан с PortSwigger / Burp Suite — см. [LEGAL.md](LEGAL.md).
+<p align="center">
+  Локальный HTTP/1.1 прокси, карта цели и рабочий стол для своей лаборатории.<br>
+  Independent project — not PortSwigger, not Burp Suite.
+</p>
 
-Только **свой** трафик и лабораторные стенды. Активные шаги (перебор путей, DNS, порты) включаются после явной галочки «это моя цель».
+<p align="center">
+  <a href="#en">English</a> ·
+  <a href="#ru">Русский</a> ·
+  <a href="ARCHITECTURE.md">Architecture</a> ·
+  <a href="LEGAL.md">Legal</a>
+</p>
 
-## Запуск
+---
 
-Нужен [Go](https://go.dev/dl/) 1.22+.
+<a id="en"></a>
+## English
+
+AURA is a **desktop GTK/WebKit app** plus a local API. Point a browser at `127.0.0.1:8080`, confirm the host is yours, and build a **Site map** from proxy history and recon modules.
+
+| Listen | Default | What it is |
+| --- | --- | --- |
+| UI / API | `127.0.0.1:1337` | Map, Proxy, Replay, Payloads… |
+| Proxy | `127.0.0.1:8080` | HTTP/1.1 intercept (no HTTP/2 MITM) |
+| Callback | `127.0.0.1:8082` | Out-of-band hits for your own tests |
+
+Active probes (DNS brute, ports, dirs, params) stay off until you check **This is my target / lab**.
+
+### Requirements
+
+- Go 1.22+
+- Linux with GTK 3 and WebKitGTK 4.1 (Kali/Debian)
 
 ```bash
-go build -o aura ./cmd/server
+sudo apt install golang-go gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+git clone git@github.com:msdrakula/AURA.git
+cd AURA
+CGO_ENABLED=1 go build -o aura ./cmd/server
 ./aura
 ```
 
-- UI: http://127.0.0.1:1337 — вкладка **Карта**
-- Прокси: `127.0.0.1:8080`
-- Callback: `127.0.0.1:8082`
+Menu entry on Kali:
 
 ```bash
-./aura --api-port 1337 --proxy-host 127.0.0.1 --proxy-port 8080 --db-path aura.db --ca-dir data
+sh packaging/kali/install-command.sh
 ```
 
-Если рядом ещё есть старый `meb.db`, он подхватится автоматически, пока не появится `aura.db`.
+### HTTPS
 
-## Как устроен экран
+1. Open **Proxy → Settings**, download `aura-ca.crt`.
+2. Trust that CA in the browser / OS.
+3. Set HTTP proxy to `127.0.0.1:8080`.
 
-1. **Карта** — цель, шаги разведки, дерево приложения.
-2. **Прокси** — перехват и история трафика.
-3. **Пути / Фаззинг / Пакеты** — перебор путей, подстановка `FUZZ`, пакетная подстановка в шаблон.
-4. **Повтор** — один HTTP-запрос туда-обратно.
-5. Остальное — декодер, diff, анализ токенов, колбэк, сохранённые запросы.
+A fresh CA is created on first run under `data/`. Do not copy another machine’s CA keys.
 
-## Как собрать карту
+### Map
 
-1. Вставьте домен или URL.
-2. Если цель ваша / лабораторная — отметьте галочку.
-3. Идите по шагам слева: поддомены → живые хосты → технологии → HTML/JS → пути → параметры.
-4. Справа растёт дерево хостов и путей. Можно подтянуть уже пойманный Proxy history.
+1. Browse through the proxy — hosts and paths land on **Map → Site map**.
+2. Type the host, check the lab box, click **Start**.
+3. Run modules (subdomains, DNS, live hosts, ports, tech, Wayback, scrape, dirs, params). Findings merge into the same tree.
+4. **Scope** is a separate tab and filters the tree.
 
-Пассивные шаги ходят в открытые источники (crt.sh, Wayback). Активные шлют запросы только на введённую цель.
+### Wordlists
 
-## Словари SecLists
-
-Все текстовые словари из [SecLists](https://github.com/danielmiessler/SecLists) (MIT) индексируются при старте из `third_party/SecLists`. В Переборе есть поиск по полному каталогу: выбираете файл, AURA читает его с диска (не через браузер). Карта на шагах «пути / параметры / DNS» берёт стандартные словари директорий, имён параметров и поддоменов, если они есть в SecLists.
+Optional [SecLists](https://github.com/danielmiessler/SecLists) (MIT):
 
 ```bash
 git clone --depth 1 https://github.com/danielmiessler/SecLists.git third_party/SecLists
 ```
 
-- **Discover** — словари директорий (как gobuster dir).
-- **Fuzz** — подстановка `FUZZ` в URL (как ffuf). Словари путей и параметров встроены, короткие.
+Discover / Fuzz / Map pick files from disk. Built-in short lists work without SecLists.
 
-## HTTPS
+### Flags
 
-1. Скачайте CA с вкладки Proxy (`aura-ca.crt`).
-2. Добавьте сертификат в доверенные центры.
-3. Укажите HTTP-прокси `127.0.0.1:8080`.
+```bash
+./aura \
+  --api-port 1337 \
+  --proxy-host 127.0.0.1 \
+  --proxy-port 8080 \
+  --callback-port 8082 \
+  --db-path aura.db \
+  --ca-dir data \
+  --window=true
+```
 
-Если раньше был импортирован старый CA, импортируйте новый **AURA Intercept CA**.
+`--window=false` serves the UI in a normal browser tab.
 
-## Ещё
+---
 
-HTTP/1.1 MITM, intercept, replay, decoder, token analysis, saved items. Прокси без HTTP/2.
+<a id="ru"></a>
+## Русский
+
+AURA — это **окно GTK** и локальный прокси. Трафик браузера идёт через вас. Карта цели собирается из истории прокси и модулей разведки.
+
+Используйте только **свой** трафик и лабораторные стенды.
+
+### Вкладки
+
+| Вкладка | Зачем |
+| --- | --- |
+| **Map** | Site map + модули (поддомены, DNS, порты, tech, Wayback, HTML/JS, пути, параметры) |
+| **Scope** | Включить / исключить хосты |
+| **Proxy** | Перехват, HTTP history, match & replace |
+| **Discover / Fuzz** | Перебор путей и подстановка `FUZZ` |
+| **Payloads / Replay** | Пакетная подстановка и один запрос туда-обратно |
+| **Scanner** | Пассивный разбор запроса |
+| **Decoder / Diff / Tokens** | Кодировки, сравнение, энтропия |
+| **Callback** | Локальный колбэк `8082` |
+| **Saved / Other** | Сохранённые запросы и находки analyzer |
+
+### Сборка
+
+```bash
+sudo apt install golang-go gcc pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+git clone git@github.com:msdrakula/AURA.git
+cd AURA
+CGO_ENABLED=1 go build -o aura ./cmd/server
+./aura
+```
+
+- Интерфейс: http://127.0.0.1:1337
+- Прокси: `127.0.0.1:8080`
+- Колбэк: `127.0.0.1:8082`
+
+Старый `meb.db` подхватится сам, пока нет `aura.db`.
+
+### Карта цели
+
+1. Ходите сайтом через прокси — дерево на **Map → Site map** заполняется сразу.
+2. Вставьте хост, отметьте «это моя цель / лаборатория», нажмите **Начать**.
+3. Откройте модуль, настройте timeout / wordlist / порты, **Запустить**.
+4. Находки модулей дописываются в то же дерево, что и история прокси.
+
+Пассивные шаги ходят в открытые источники (crt.sh, Wayback). Активные шлют запросы только на подтверждённую цель.
+
+### HTTPS
+
+Скачайте CA со вкладки Proxy (`aura-ca.crt`), добавьте в доверенные, укажите прокси `127.0.0.1:8080`. Если раньше стоял старый CA — импортируйте новый **AURA Intercept CA**.
+
+---
+
+## Репозиторий
+
+В git — исходники, UI, тесты, упаковка под Kali.
+
+На каждой машине **заново** появляются (и не хранятся в git):
+
+- `data/ca/`, `data/leaf/` — локальный MITM CA
+- `aura.db` / `meb.db` — история прокси
+- `data/debug/*.jsonl` — журнал сессии
+- бинарник `aura` после `go build`
+- `third_party/SecLists/` — клонируется отдельно
+
+Это не «секрет продукта», это **ваши** ключи и трафик с этого компьютера. Дома AURA создаст свои.
+
+## Лицензия и независимость
+
+Свой независимый инструмент. Нет кода, иконок и документации PortSwigger / Burp Suite — см. [LEGAL.md](LEGAL.md). Прокси только HTTP/1.1.
