@@ -17,7 +17,8 @@
   <a href="#en">English</a> ·
   <a href="#ru">Русский</a> ·
   <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="LICENSE">License</a>
+  <a href="LICENSE">License</a> ·
+  <a href="DISCLAIMER.md">Disclaimer</a>
 </p>
 
 ---
@@ -98,6 +99,8 @@ Discover / Fuzz / Map pick files from disk. Built-in short lists work without Se
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — personal / noncommercial use. Companies and paid work need written permission. Plain language: [LICENSE-NOTES.md](LICENSE-NOTES.md).
 
+The authors are not liable if someone uses AURA to cause harm. Full text: [DISCLAIMER.md](DISCLAIMER.md).
+
 ---
 
 <a id="ru"></a>
@@ -171,3 +174,5 @@ CGO_ENABLED=1 go build -o aura ./cmd/server
 ### Лицензия
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — для себя и некоммерции. Компаниям и платной работе нужно письменное разрешение. Простыми словами: [LICENSE-NOTES.md](LICENSE-NOTES.md).
+
+Автор не отвечает, если кто‑то применяет AURA во вред. Текст: [DISCLAIMER.md](DISCLAIMER.md).

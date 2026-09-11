@@ -26,6 +26,10 @@ PolyForm Noncommercial also allows some non-profit / educational / government us
 
 Optional dictionaries in `third_party/SecLists/` stay under their own MIT license. AURA does not relicense them.
 
+## No liability for harm
+
+The authors are not responsible if anyone uses AURA to cause harm or break the law. You use it at your own risk. See [DISCLAIMER.md](DISCLAIMER.md).
+
 ---
 
 # Простыми словами
@@ -47,3 +51,7 @@ Optional dictionaries in `third_party/SecLists/` stay under their own MIT licens
 Чтобы пользоваться AURA в компании — только **с разрешения автора** (отдельный договор / письменная лицензия).
 
 Пишите issue в [msdrakula/AURA](https://github.com/msdrakula/AURA/issues) с темой `Commercial license`.
+
+## Отказ от ответственности
+
+Автор не отвечает, если AURA применяют во вред или с нарушением закона. Пользуетесь на свой риск. См. [DISCLAIMER.md](DISCLAIMER.md).

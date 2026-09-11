@@ -7,5 +7,6 @@ Start here:
 - [README](../README.md) — run, proxy port, CA, SecLists
 - [ARCHITECTURE](../ARCHITECTURE.md) — packages and data flow
 - [LEGAL](../LEGAL.md) — no affiliation with PortSwigger
+- [DISCLAIMER](../DISCLAIMER.md) — no liability for harmful use
 
 UI is served from `web/`. There is no copy of third-party commercial manuals in this tree.
