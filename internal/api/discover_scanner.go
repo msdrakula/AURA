@@ -21,6 +21,7 @@ type DiscoverRequest struct {
 	Workers      int      `json:"workers"`
 	RPS          int      `json:"rps"`
 	Cookies      string   `json:"cookies"`
+	Authorized   bool     `json:"authorized"`
 }
 
 func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
@@ -31,6 +32,9 @@ func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.BaseURL == "" {
 		writeErr(w, 400, "base_url is required")
+		return
+	}
+	if rejectUnlessAuthorized(w, body.Authorized) {
 		return
 	}
 	words, err := s.resolveWords(body.Wordlist, body.WordlistPath, "dirs")
@@ -74,9 +78,10 @@ func (s *Server) discoverRun(w http.ResponseWriter, r *http.Request) {
 
 // ScanRequest is the body for POST /api/scanner/scan.
 type ScanRequest struct {
-	Raw    string `json:"raw"`
-	Scheme string `json:"scheme"`
-	Target string `json:"target"`
+	Raw        string `json:"raw"`
+	Scheme     string `json:"scheme"`
+	Target     string `json:"target"`
+	Authorized bool   `json:"authorized"`
 }
 
 func (s *Server) scannerRun(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +92,9 @@ func (s *Server) scannerRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(body.Raw) == "" {
 		writeErr(w, 400, "raw is required")
+		return
+	}
+	if rejectUnlessAuthorized(w, body.Authorized) {
 		return
 	}
 	if body.Scheme == "" {

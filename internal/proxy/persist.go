@@ -13,16 +13,33 @@ import (
 )
 
 func (s *Server) finish(id string, req *httpio.Request, resp *httpio.Response, started time.Time, comment string) {
+	recorded := false
 	if s.shouldRecordHistory() && s.history != nil {
 		tx := transactionFrom(id, req, resp, started, comment)
 		if err := s.history.SaveTransaction(tx); err != nil {
 			s.log.Error("save transaction", zap.Error(err), zap.String("id", id))
+		} else {
+			recorded = true
 		}
 	}
 	if s.shouldRecordHistory() && resp != nil && s.analyzer != nil {
 		s.analyzer.Persist(s.log, s.findings, id, req, resp)
 	}
+	if recorded {
+		s.notifyHistoryFlow()
+	}
 	logProxyFlow(id, req, resp, started, comment)
+}
+
+// notifyHistoryFlow tells the UI to reload History/Map. Same event shape as
+// tool-saved flows: type=flow, no in-memory AddFlow (SQLite is the log).
+func (s *Server) notifyHistoryFlow() {
+	type flowNotifier interface {
+		Emit(event any)
+	}
+	if n, ok := any(s.rt).(flowNotifier); ok {
+		n.Emit(map[string]any{"type": "flow", "source": "proxy"})
+	}
 }
 
 func (s *Server) shouldRecordHistory() bool {

@@ -88,6 +88,32 @@ func (m *memStore) ListArtifacts(targetID string) ([]Artifact, error) {
 	return append([]Artifact{}, m.arts[targetID]...), nil
 }
 
+func TestCatalogTechIsActive(t *testing.T) {
+	cat, ok := stageByID("tech")
+	if !ok || cat.Mode != ModeActive {
+		t.Fatalf("tech mode=%q ok=%v", cat.Mode, ok)
+	}
+}
+
+func TestEnsureTargetRevokesAuthorized(t *testing.T) {
+	st := newMem()
+	eng := &Engine{Store: st}
+	tg, err := eng.EnsureTarget("lab.local", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tg.Authorized {
+		t.Fatal("want authorized")
+	}
+	tg, err = eng.EnsureTarget("lab.local", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tg.Authorized {
+		t.Fatal("checkbox off must revoke lab flag")
+	}
+}
+
 func TestNormalizeInput(t *testing.T) {
 	d, b, err := NormalizeInput("Example.COM")
 	if err != nil || d != "example.com" || b != "https://example.com/" {
@@ -165,6 +191,10 @@ func TestEngineLiveAndActiveGuard(t *testing.T) {
 	_, err = eng.RunStage(context.Background(), target.ID, "live_hosts")
 	if err == nil {
 		t.Fatal("expected authorization error")
+	}
+	_, err = eng.RunStage(context.Background(), target.ID, "tech")
+	if err == nil {
+		t.Fatal("expected tech to require authorization")
 	}
 	target.Authorized = true
 	_ = st.UpdateTarget(target)

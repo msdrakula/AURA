@@ -30,8 +30,8 @@ func Catalog() []CatalogStage {
 		{
 			ID:    "tech",
 			Title: "Технологии",
-			Hint:  "Отпечатки стека: Server, cookies, HTML, известные CDN/auth. Таймаут на запрос.",
-			Mode:  ModePassive,
+			Hint:  "HTTP GET на цель: Server, cookies, HTML, известные CDN/auth. Нужна галочка «своя цель».",
+			Mode:  ModeActive,
 		},
 		{
 			ID:    "urls_passive",

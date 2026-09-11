@@ -94,7 +94,7 @@ VALUES (?, ?, ?, ?, '', ?, ?)
 ON CONFLICT(host) DO UPDATE SET
 	updated = excluded.updated,
 	base_url = CASE WHEN excluded.base_url = '' THEN recon_targets.base_url ELSE excluded.base_url END,
-	authorized = CASE WHEN excluded.authorized = 0 THEN recon_targets.authorized ELSE excluded.authorized END`
+	authorized = excluded.authorized`
 
 	sqlGetTargetByHost = `SELECT id, host, created, updated, notes, base_url, authorized FROM recon_targets WHERE host = ?`
 

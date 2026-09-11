@@ -177,6 +177,7 @@ type fuzzBody struct {
 	RPS          int               `json:"rps"`
 	Hide         []int             `json:"hide"`
 	WordlistName string            `json:"wordlist_name"`
+	Authorized   bool              `json:"authorized"`
 }
 
 func (s *Server) resolveWords(inline []string, path, kind string) ([]string, error) {
@@ -203,6 +204,9 @@ func (s *Server) fuzzRun(w http.ResponseWriter, r *http.Request) {
 	var body fuzzBody
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeErr(w, 400, "invalid JSON")
+		return
+	}
+	if rejectUnlessAuthorized(w, body.Authorized) {
 		return
 	}
 	words, err := s.resolveWords(body.Wordlist, body.WordlistPath, body.WordlistName)

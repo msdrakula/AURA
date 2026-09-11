@@ -1744,6 +1744,7 @@ $("#btnDiscRun").addEventListener("click", async () => {
   const custom = $("#discWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#discWlSelect")?.value || "";
   if (!base || (custom.length === 0 && !path)) { uiFlash(tr("disc.need")); return; }
+  if (!requireLabAuth($("#discAuth"))) return;
   $("#discBody").innerHTML = "";
   try {
     const data = await runJob("discover", {
@@ -1755,6 +1756,7 @@ $("#btnDiscRun").addEventListener("click", async () => {
         base_url: base, wordlist: custom, wordlist_path: custom.length ? "" : path,
         workers: +$("#discWorkers").value || 10,
         rps: +$("#discRps").value || 20, cookies: $("#discCookies").value,
+        authorized: true,
       }) }),
     });
     if (!data || data.aborted) return;
@@ -1824,6 +1826,7 @@ $("#btnScanRun").addEventListener("click", async () => {
     $("#scanRaw")?.focus();
     return;
   }
+  if (!requireLabAuth($("#scanAuth"))) return;
   $("#scanBody").innerHTML = "";
   try {
     const data = await runJob("scanner", {
@@ -1833,6 +1836,7 @@ $("#btnScanRun").addEventListener("click", async () => {
       meta: $("#scanMeta"),
       fn: (signal) => api("/api/scanner/scan", { method: "POST", signal, body: JSON.stringify({
         raw, scheme: $("#scanScheme").value, target: $("#scanTarget").value.trim(),
+        authorized: true,
       }) }),
     });
     if (!data || data.aborted) return;
@@ -2255,7 +2259,7 @@ function displayMapHost(h, base) {
 function mapCatalog() {
   if (mapState.catalog && mapState.catalog.length) return mapState.catalog;
   return ["subdomains_passive", "dns_brute", "live_hosts", "web_ports", "tech", "urls_passive", "scrape", "dirs", "params"]
-    .map((id) => ({ id, mode: id === "subdomains_passive" || id === "tech" || id === "urls_passive" ? "passive" : "active" }));
+    .map((id) => ({ id, mode: id === "subdomains_passive" || id === "urls_passive" ? "passive" : "active" }));
 }
 
 function syncMapSubtabBusy() {
@@ -2385,8 +2389,7 @@ $("#mapProxyHosts")?.addEventListener("click", (e) => {
   const b = e.target.closest("[data-map-host]");
   if (!b) return;
   $("#mapTarget").value = b.dataset.mapHost;
-  $("#mapAuth").checked = true;
-  $("#mapForm").requestSubmit();
+  $("#mapTarget").focus();
 });
 $("#view-map").addEventListener("change", (e) => {
   if (e.target.closest(".map-stage-page")) collectMapOpts();
@@ -2486,10 +2489,18 @@ $("#btnFuzzParams")?.addEventListener("click", async () => {
   $("#fuzzWords").value = (w.params || []).join("\n");
   if (!$("#fuzzUrl").value.includes("FUZZ")) $("#fuzzUrl").value = "https://example.com/?FUZZ=1";
 });
+function requireLabAuth(box) {
+  if (box && box.checked) return true;
+  uiFlash(tr("lab.needAuth"));
+  box?.focus();
+  return false;
+}
+
 $("#btnFuzzRun")?.addEventListener("click", async () => {
   const hide = ($("#fuzzHide").value || "").split(",").map((s) => Number(s.trim())).filter(Boolean);
   const custom = $("#fuzzWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#fuzzWlSelect")?.value || "";
+  if (!requireLabAuth($("#fuzzAuth"))) return;
   try {
     const data = await runJob("fuzz", {
       label: tr("work.fuzz"),
@@ -2508,6 +2519,7 @@ $("#btnFuzzRun")?.addEventListener("click", async () => {
           workers: Number($("#fuzzWorkers").value),
           rps: Number($("#fuzzRps").value),
           hide,
+          authorized: true,
         }),
       }),
     });

@@ -96,4 +96,10 @@ func TestIntelTargetAndArtifacts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, arts, 1)
 	assert.Equal(t, "/api", arts[0].Value)
+
+	tg.Authorized = false
+	require.NoError(t, st.CreateTarget(tg))
+	got, err = st.GetTarget("t1")
+	require.NoError(t, err)
+	assert.False(t, got.Authorized)
 }

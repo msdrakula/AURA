@@ -230,6 +230,32 @@ func TestHTMLI18nKeysExist(t *testing.T) {
 	}
 }
 
+func TestLabConfirmWiredOnActiveTools(t *testing.T) {
+	html := readWeb(t, "index.html")
+	js := readWeb(t, "static/app.js")
+	for _, id := range []string{`id="discAuth"`, `id="fuzzAuth"`, `id="scanAuth"`} {
+		if !strings.Contains(html, id) {
+			t.Fatalf("missing %s", id)
+		}
+	}
+	if !strings.Contains(js, "function requireLabAuth") {
+		t.Fatal("requireLabAuth helper missing")
+	}
+	if strings.Contains(js, `$("#mapAuth").checked = true`) {
+		t.Fatal("host chip must not auto-authorize the lab checkbox")
+	}
+	for _, needle := range []string{
+		`authorized: true`,
+		`$("#discAuth")`,
+		`$("#fuzzAuth")`,
+		`$("#scanAuth")`,
+	} {
+		if !strings.Contains(js, needle) {
+			t.Fatalf("active tool wiring missing %s", needle)
+		}
+	}
+}
+
 func TestScanNeedKeyPresent(t *testing.T) {
 	en := i18nKeys(t, readWeb(t, "static/i18n.js"), "en")
 	if _, ok := en["scan.need"]; !ok {

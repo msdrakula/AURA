@@ -708,6 +708,7 @@ Accept: */*
           <p class="muted" id="discWlMeta"></p>
           <label><span data-i18n="disc.orCustom">Or your own list</span> <textarea id="discWords" class="raw" data-i18n-placeholder="disc.customPh" placeholder="if filled, used instead of SecLists"></textarea></label>
           <button id="btnDiscBuiltin" data-i18n="disc.short">Short built-in</button>
+          <label class="check"><input type="checkbox" id="discAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
           <div class="job-actions">
             <button id="btnDiscRun" class="primary" data-i18n="disc.start">Start discovery</button>
             <button id="btnDiscStop" type="button" disabled data-i18n="work.stop">Stop</button>
@@ -752,6 +753,7 @@ Accept: */*
             <button id="btnFuzzDirs" data-i18n="fuzz.shortPaths">Short: paths</button>
             <button id="btnFuzzParams" data-i18n="fuzz.shortParams">Short: params</button>
           </div>
+          <label class="check"><input type="checkbox" id="fuzzAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
           <div class="job-actions">
             <button id="btnFuzzRun" class="primary" data-i18n="fuzz.start">Start fuzz</button>
             <button id="btnFuzzStop" type="button" disabled data-i18n="work.stop">Stop</button>
@@ -783,6 +785,7 @@ Accept: */*
             <label class="tb-field tb-grow"><span data-i18n="field.target">Target</span> <input id="scanTarget" data-i18n-placeholder="intr.targetPh" placeholder="host:port (optional)" /></label>
           </div>
           <textarea id="scanRaw" class="raw" spellcheck="false" data-i18n-placeholder="scan.rawPh" placeholder="Paste a request to scan"></textarea>
+          <label class="check"><input type="checkbox" id="scanAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
           <div class="job-actions">
             <button id="btnScanRun" class="primary" data-i18n="scan.start">Start scan</button>
             <button id="btnScanStop" type="button" disabled data-i18n="work.stop">Stop</button>

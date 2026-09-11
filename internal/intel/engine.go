@@ -72,8 +72,8 @@ func (e *Engine) EnsureTarget(raw string, authorized bool) (Target, error) {
 	for _, t := range existing {
 		if strings.EqualFold(t.Domain, domain) {
 			changed := false
-			if authorized && !t.Authorized {
-				t.Authorized = true
+			if t.Authorized != authorized {
+				t.Authorized = authorized
 				changed = true
 			}
 			if base != "" && t.BaseURL != base {

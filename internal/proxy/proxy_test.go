@@ -106,6 +106,8 @@ func TestProxyHTTPForward(t *testing.T) {
 		Certs:    certs.NewAuthority(t.TempDir()),
 		Log:      zap.NewNop(),
 	})
+	events := st.Subscribe()
+	t.Cleanup(func() { st.Unsubscribe(events) })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	require.NoError(t, px.Start(ctx))
@@ -138,6 +140,23 @@ func TestProxyHTTPForward(t *testing.T) {
 	require.NotEmpty(t, hist)
 	assert.Equal(t, "GET", hist[0].Request.Method)
 	assert.Empty(t, st.History())
+	require.True(t, waitForFlowEvent(t, events), "UI must get a WS flow event after proxy history save")
+}
+
+func waitForFlowEvent(t *testing.T, events <-chan any) bool {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case ev := <-events:
+			m, _ := ev.(map[string]any)
+			if m["type"] == "flow" && m["source"] == "proxy" {
+				return true
+			}
+		case <-deadline:
+			return false
+		}
+	}
 }
 
 func TestProxyRespectsRecordHistoryFalse(t *testing.T) {
@@ -162,6 +181,8 @@ func TestProxyRespectsRecordHistoryFalse(t *testing.T) {
 		Certs:    certs.NewAuthority(t.TempDir()),
 		Log:      zap.NewNop(),
 	})
+	events := st.Subscribe()
+	t.Cleanup(func() { st.Unsubscribe(events) })
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	require.NoError(t, px.Start(ctx))
@@ -187,6 +208,14 @@ func TestProxyRespectsRecordHistoryFalse(t *testing.T) {
 	hist, err := db.GetTransactions(10, 0)
 	require.NoError(t, err)
 	assert.Empty(t, hist)
+	select {
+	case ev := <-events:
+		m, _ := ev.(map[string]any)
+		if m["type"] == "flow" {
+			t.Fatalf("unexpected flow event when history is off: %v", ev)
+		}
+	default:
+	}
 }
 
 func TestProxySaveErrorsDoNotBreakForward(t *testing.T) {
