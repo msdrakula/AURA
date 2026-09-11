@@ -10,15 +10,13 @@
 </p>
 
 <p align="center">
-  Локальный HTTP/1.1 прокси, карта цели и рабочий стол для своей лаборатории.<br>
-  Independent project — not PortSwigger, not Burp Suite.
+  Локальный HTTP/1.1 прокси, карта цели и рабочий стол для своей лаборатории.
 </p>
 
 <p align="center">
   <a href="#en">English</a> ·
   <a href="#ru">Русский</a> ·
-  <a href="ARCHITECTURE.md">Architecture</a> ·
-  <a href="LEGAL.md">Legal</a>
+  <a href="ARCHITECTURE.md">Architecture</a>
 </p>
 
 ---
@@ -163,6 +161,4 @@ CGO_ENABLED=1 go build -o aura ./cmd/server
 
 Это не «секрет продукта», это **ваши** ключи и трафик с этого компьютера. Дома AURA создаст свои.
 
-## Лицензия и независимость
-
-Свой независимый инструмент. Нет кода, иконок и документации PortSwigger / Burp Suite — см. [LEGAL.md](LEGAL.md). Прокси только HTTP/1.1.
+Прокси работает по **HTTP/1.1**.
