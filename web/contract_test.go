@@ -55,6 +55,25 @@ func TestCacheBustAligned(t *testing.T) {
 	}
 }
 
+func TestHandbookSkin(t *testing.T) {
+	css := readWeb(t, "static/app.css")
+	html := readWeb(t, "index.html")
+	for _, needle := range []string{"--mark:", "--display:", `"Fraunces"`, `"IBM Plex Sans"`, `"IBM Plex Mono"`, "--line: #1c322f", "--radius: 0px", "--bg-2: #ffffff", "--frame: 2px", "--paper-shadow:", ".page-head", "--fs-title: 22px", "--fs-ui: 13px"} {
+		if !strings.Contains(css, needle) {
+			t.Errorf("handbook skin missing %s", needle)
+		}
+	}
+	if !strings.Contains(html, `data-theme="light"`) {
+		t.Fatal("default theme must be light (handbook paper)")
+	}
+	if !strings.Contains(html, "fonts.css") {
+		t.Fatal("index must load fonts.css")
+	}
+	if strings.Contains(css, "font-size: 52px") || strings.Contains(css, "font-size: 42px") {
+		t.Fatal("page titles must use --fs-title, not poster sizes")
+	}
+}
+
 func TestToolbarFieldsNotSquares(t *testing.T) {
 	css := readWeb(t, "static/app.css")
 	bad := regexp.MustCompile(`\.toolbar input,\s*\.toolbar select\s*\{[^}]*flex:\s*1`)

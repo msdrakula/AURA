@@ -216,7 +216,7 @@ function migrateNavOrder(order, defaults) {
 const UILayout = {
   key: "aura_ui_v3",
   defaults: {
-    theme: "dark",
+    theme: "light",
     uiScale: 100,
     editorScale: 100,
     showTag: true,
@@ -252,7 +252,7 @@ const UILayout = {
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(this.key) || "{}"); } catch (_) { saved = {}; }
     if (!saved.theme) {
-      try { saved.theme = localStorage.getItem("aura_theme") || localStorage.getItem("meb_theme") || "dark"; } catch (_) { saved.theme = "dark"; }
+      try { saved.theme = localStorage.getItem("aura_theme") || localStorage.getItem("meb_theme") || "light"; } catch (_) { saved.theme = "light"; }
     }
     this.data = {
       ...this.defaults,
@@ -433,7 +433,7 @@ const UILayout = {
     this.data.tabOrder = this.defaults.tabOrder.slice();
     this.data.splits = { ...this.defaults.splits };
     this.save();
-    applyTheme("dark");
+    applyTheme("light");
     this.applyChrome();
     this.refresh();
     NavTabs.applyOrder();
@@ -447,7 +447,7 @@ const UILayout = {
     $$(".settings-pane").forEach((p) => p.classList.toggle("hidden", p.dataset.setpane !== name));
     this.applyChrome();
     $$("#setLangSwitch button").forEach((b) => b.classList.toggle("active", b.dataset.lang === mebLang));
-    $$("#setThemeSwitch button").forEach((b) => b.classList.toggle("active", (document.documentElement.getAttribute("data-theme") || "dark") === b.dataset.theme));
+    $$("#setThemeSwitch button").forEach((b) => b.classList.toggle("active", (document.documentElement.getAttribute("data-theme") || "light") === b.dataset.theme));
   },
   close() {
     $("#settingsOverlay")?.classList.add("hidden");
@@ -455,7 +455,7 @@ const UILayout = {
   init() {
     this.load();
     this.applyChrome();
-    applyTheme(this.data.theme || localStorage.getItem("aura_theme") || "dark");
+    applyTheme(this.data.theme || localStorage.getItem("aura_theme") || "light");
     this.refresh();
     $("#btnSettings")?.addEventListener("click", () => this.open("look"));
     $("#btnSettingsClose")?.addEventListener("click", () => this.close());
