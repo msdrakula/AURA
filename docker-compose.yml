@@ -1,0 +1,16 @@
+services:
+  aura:
+    build: .
+    image: aura:latest
+    container_name: aura
+    ports:
+      - "1337:1337"   # UI / API  -> http://127.0.0.1:1337
+      - "8080:8080"   # HTTP-прокси (укажите в браузере)
+    volumes:
+      - aura-data:/app/data        # БД истории + CA + debug-логи
+      # опционально wordlists:
+      # - ./third_party/SecLists:/app/third_party/SecLists:ro
+    restart: unless-stopped
+
+volumes:
+  aura-data:

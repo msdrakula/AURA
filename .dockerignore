@@ -1,0 +1,19 @@
+.git
+.gitignore
+
+# локальные данные и собранный бинарник
+data
+aura.db
+meb.db
+aura
+
+# опциональные wordlists клонируются отдельно и подключаются volume-ом
+third_party/SecLists
+
+# не нужно в образе
+docs
+packaging
+*.md
+Dockerfile
+docker-compose.yml
+.dockerignore
