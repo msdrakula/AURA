@@ -61,6 +61,20 @@ func findRoot() string {
 	return "."
 }
 
+// detectSecLists picks the first existing SecLists directory.
+func detectSecLists(root string) string {
+	cands := []string{filepath.Join(root, "third_party", "SecLists"), "/usr/share/seclists"}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		cands = append(cands, filepath.Join(home, "seclists"), filepath.Join(home, "SecLists"))
+	}
+	for _, c := range cands {
+		if st, err := os.Stat(c); err == nil && st.IsDir() {
+			return c
+		}
+	}
+	return cands[0]
+}
+
 func resolveUnder(root, p string) (string, error) {
 	if p == "" {
 		return root, nil
@@ -94,7 +108,7 @@ func run() error {
 	callbackPort := flag.Int("callback-port", 8082, "callback receiver listen port")
 	dbPath := flag.String("db-path", "aura.db", "SQLite database file")
 	caDir := flag.String("ca-dir", "data", "directory for CA and leaf certificates")
-	seclistsDir := flag.String("seclists-dir", "", "path to SecLists (default: <app>/third_party/SecLists)")
+	seclistsDir := flag.String("seclists-dir", "", "path to SecLists (default: first of <app>/third_party/SecLists, /usr/share/seclists, ~/seclists)")
 	openWindow := flag.Bool("window", true, "open the UI in a dedicated GTK/WebKit window")
 	flag.Parse()
 
@@ -180,7 +194,7 @@ func run() error {
 
 	listsRoot := *seclistsDir
 	if listsRoot == "" {
-		listsRoot = filepath.Join(root, "third_party", "SecLists")
+		listsRoot = detectSecLists(root)
 	}
 	listsRoot, err = filepath.Abs(listsRoot)
 	if err != nil {
