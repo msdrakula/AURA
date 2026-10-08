@@ -15,8 +15,8 @@
       }
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/static/fonts.css?v=62" />
-  <link rel="stylesheet" href="/static/app.css?v=62" />
+  <link rel="stylesheet" href="/static/fonts.css?v=63" />
+  <link rel="stylesheet" href="/static/app.css?v=63" />
 </head>
 <body>
 <div id="app">
@@ -60,15 +60,15 @@
     <button data-view="proxy"><span data-i18n="nav.proxy">Proxy</span><span class="dot hidden" id="proxyDot"></span></button>
     <button data-view="discover" data-i18n="nav.discover">Discover</button>
     <button data-view="fuzz" data-i18n="nav.fuzz">Fuzz</button>
-    <button data-view="intruder" data-i18n="nav.intruder">Payloads</button>
-    <button data-view="repeater" data-i18n="nav.repeater">Replay</button>
+    <button data-view="intruder" data-i18n="nav.intruder">Intruder</button>
+    <button data-view="repeater" data-i18n="nav.repeater">Repeater</button>
     <button data-view="scanner" data-i18n="nav.scanner">Scanner</button>
     <button data-view="logger" data-i18n="nav.logger">Logger</button>
     <button data-view="decoder" data-i18n="nav.decoder">Decoder</button>
-    <button data-view="comparer" data-i18n="nav.comparer">Diff</button>
-    <button data-view="sequencer" data-i18n="nav.sequencer">Tokens</button>
-    <button data-view="collaborator" data-i18n="nav.collaborator">Callback</button>
-    <button data-view="organizer" data-i18n="nav.organizer">Saved</button>
+    <button data-view="comparer" data-i18n="nav.comparer">Comparer</button>
+    <button data-view="sequencer" data-i18n="nav.sequencer">Sequencer</button>
+    <button data-view="collaborator" data-i18n="nav.collaborator">Collaborator</button>
+    <button data-view="organizer" data-i18n="nav.organizer">Organizer</button>
     <button data-view="other" data-i18n="nav.other">Other</button>
     <button data-view="extensions" class="hidden" hidden data-i18n="nav.extensions">Extensions</button>
   </nav>
@@ -76,17 +76,17 @@
     (function () {
       var ru = {
         map: "Карта", scope: "Область", proxy: "Прокси", discover: "Пути", fuzz: "Фаззинг",
-        intruder: "Пакеты", repeater: "Повтор",
+        intruder: "Перебор", repeater: "Повтор",
         scanner: "Сканер", logger: "Лог", decoder: "Декодер",
         comparer: "Сравнение", sequencer: "Токены",
-        collaborator: "Колбэк", organizer: "Сохранённые", other: "Прочее", extensions: "Расширения"
+        collaborator: "OOB-колбэк", organizer: "Коллекции", other: "Прочее", extensions: "Расширения"
       };
       var en = {
         map: "Map", scope: "Scope", proxy: "Proxy", discover: "Discover", fuzz: "Fuzz",
-        intruder: "Payloads", repeater: "Replay",
+        intruder: "Intruder", repeater: "Repeater",
         scanner: "Scanner", logger: "Logger", decoder: "Decoder",
-        comparer: "Diff", sequencer: "Tokens",
-        collaborator: "Callback", organizer: "Saved", other: "Other", extensions: "Extensions"
+        comparer: "Comparer", sequencer: "Sequencer",
+        collaborator: "Collaborator", organizer: "Organizer", other: "Other", extensions: "Extensions"
       };
         var lang = "en";
       try { lang = localStorage.getItem("aura_lang") || localStorage.getItem("meb_lang") || "en"; } catch (e) {}
@@ -116,12 +116,14 @@
         <button data-sub="scrape" data-i18n="stage.scrape.title">HTML and JavaScript</button>
         <button data-sub="dirs" data-i18n="stage.dirs.title">Hidden paths</button>
         <button data-sub="params" data-i18n="stage.params.title">Parameters</button>
+        <button type="button" data-sub="vulnscan" data-i18n="stage.vulnscan.title">Vulnerabilities</button>
       </nav>
       <form id="mapForm" class="toolbar map-bar">
         <input id="mapTarget" data-i18n-placeholder="map.placeholder" placeholder="https://app.lab.local:8443 or 10.0.0.8:8080" autocomplete="off" />
         <label class="check map-auth"><input type="checkbox" id="mapAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
         <button type="submit" class="primary" id="btnMapStart" data-i18n="map.start">Start</button>
         <button type="button" id="btnMapClear" data-i18n="map.clear">Clear</button>
+        <button type="button" id="btnMapRunAll" data-i18n="map.runAll">Run all</button>
         <span id="mapMeta" class="muted"></span>
       </form>
 
@@ -151,8 +153,8 @@
             <div class="split-pane">
               <div class="detail">
                 <div class="toolbar">
-                  <button id="btnSiteToRepeater" class="mini" data-i18n="proxy.toRepeater">→ Replay</button>
-                  <button id="btnSiteToIntruder" class="mini" data-i18n="proxy.toIntruder">→ Payloads</button>
+                  <button id="btnSiteToRepeater" class="mini" data-i18n="proxy.toRepeater">→ Repeater</button>
+                  <button id="btnSiteToIntruder" class="mini" data-i18n="proxy.toIntruder">→ Intruder</button>
                   <button id="btnSiteToScanner" class="mini">→ Scanner</button>
                   <button type="button" id="btnMapLogClear" class="mini" data-i18n="map.logClear">Clear</button>
                 </div>
@@ -183,6 +185,7 @@
       <div data-subpane="scrape" class="subpane hidden"><div class="map-stage-page" data-stage="scrape"></div></div>
       <div data-subpane="dirs" class="subpane hidden"><div class="map-stage-page" data-stage="dirs"></div></div>
       <div data-subpane="params" class="subpane hidden"><div class="map-stage-page" data-stage="params"></div></div>
+      <div data-subpane="vulnscan" class="subpane hidden"><div class="map-stage-page" data-stage="vulnscan"></div></div>
     </section>
 
     <!-- DASHBOARD -->
@@ -313,13 +316,13 @@
           <button id="btnHistFilter" data-i18n-title="proxy.advFilter" title="Advanced filter">⚙ <span data-i18n="proxy.filterBtn">Filter</span></button>
           <button id="btnReloadHist" data-i18n="proxy.refresh">Refresh</button>
           <button id="btnClearHist" data-i18n="proxy.clear">Clear</button>
-          <button id="btnToRepeater" class="primary" data-i18n="proxy.toRepeater">Send to Replay</button>
-          <button id="btnToIntruder" data-i18n="proxy.toIntruder">Send to Payloads</button>
-          <button id="btnToSequencer" data-i18n="proxy.toSequencer">Send to Tokens</button>
+          <button id="btnToRepeater" class="primary" data-i18n="proxy.toRepeater">Send to Repeater</button>
+          <button id="btnToIntruder" data-i18n="proxy.toIntruder">Send to Intruder</button>
+          <button id="btnToSequencer" data-i18n="proxy.toSequencer">Send to Sequencer</button>
           <button id="btnToScanner" data-i18n="proxy.toScanner">Send to Scanner</button>
           <button id="btnToDecoder" data-i18n="proxy.toDecoder">Send to Decoder</button>
-          <button id="btnToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
-          <button id="btnToOrganizer" data-i18n="proxy.toOrganizer">Send to Saved</button>
+          <button id="btnToComparer" data-i18n="proxy.toComparer">Send to Comparer</button>
+          <button id="btnToOrganizer" data-i18n="proxy.toOrganizer">Send to Organizer</button>
         </div>
         <div id="histFilterPanel" class="hist-filter hidden">
           <label class="check"><input type="checkbox" id="hfScope" /> <span data-i18n="proxy.onlyScope">Only in scope</span></label>
@@ -458,13 +461,13 @@
             <option value="https" selected>https</option>
             <option value="http">http</option>
           </select>
-          <input id="repTarget" data-i18n-placeholder="rep.targetPh" placeholder="host:port (optional, taken from Host)" />
+          <span id="repTargetView" class="rep-target" data-i18n-title="rep.targetFromHost" title="Parsed from the Host header of the request"></span>
           <button id="btnSend" class="primary" data-i18n="rep.send">Send</button>
           <button id="btnRepStop" type="button" disabled data-i18n="work.stop">Stop</button>
-          <button id="btnRepToIntruder" data-i18n="proxy.toIntruder">Send to Payloads</button>
+          <button id="btnRepToIntruder" data-i18n="proxy.toIntruder">Send to Intruder</button>
           <button id="btnRepToScanner" data-i18n="proxy.toScanner">Send to Scanner</button>
-          <button id="btnRepToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
-          <button id="btnRepToOrganizer" data-i18n="proxy.toOrganizer">Send to Saved</button>
+          <button id="btnRepToComparer" data-i18n="proxy.toComparer">Send to Comparer</button>
+          <button id="btnRepToOrganizer" data-i18n="proxy.toOrganizer">Send to Organizer</button>
           <span id="repMeta" class="muted"></span>
         </div>
         <div class="rep-layout" data-split="rep-layout" data-split-dir="h">
@@ -577,7 +580,7 @@ Accept: */*
         <div class="split-pane">
           <div class="grid-2 comparer-grid" data-split="comparer-grid" data-split-dir="h">
             <div class="split-pane pane-fill">
-              <textarea id="cmpA" class="raw" spellcheck="false" data-i18n-placeholder="cmp.left" placeholder="Left side (paste from Replay or History)"></textarea>
+              <textarea id="cmpA" class="raw" spellcheck="false" data-i18n-placeholder="cmp.left" placeholder="Left side (paste from Repeater or History)"></textarea>
             </div>
             <div class="split-pane pane-fill">
               <textarea id="cmpB" class="raw" spellcheck="false" data-i18n-placeholder="cmp.right" placeholder="Right side"></textarea>
@@ -670,8 +673,8 @@ Accept: */*
                     <select id="orgMoveColl"></select>
                     <button id="btnOrgSave">Save</button>
                     <button id="btnOrgDelete" class="danger">Delete</button>
-                    <button id="btnOrgToRepeater" data-i18n="proxy.toRepeater">Send to Replay</button>
-                    <button id="btnOrgToComparer" data-i18n="proxy.toComparer">Send to Diff</button>
+                    <button id="btnOrgToRepeater" data-i18n="proxy.toRepeater">Send to Repeater</button>
+                    <button id="btnOrgToComparer" data-i18n="proxy.toComparer">Send to Comparer</button>
                   </div>
                   <textarea id="orgNotes" data-i18n-placeholder="org.notesPh" placeholder="Notes…"></textarea>
                   <div class="split" data-split="org-detail" data-split-dir="h">
@@ -903,7 +906,7 @@ Accept: */*
     </div>
   </div>
 </div>
-<script src="/static/i18n.js?v=62"></script>
-<script src="/static/app.js?v=62"></script>
+<script src="/static/i18n.js?v=63"></script>
+<script src="/static/app.js?v=63"></script>
 </body>
 </html>

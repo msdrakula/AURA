@@ -231,7 +231,7 @@ const UILayout = {
       "map-layout": [54, 46],
       "map-app": [58, 42],
       "target-sitemap": [34, 66],
-      "rep-layout": [38, 38, 24],
+      "rep-layout": [42, 42, 16],
       "codec-grid": [42, 16, 42],
       "comparer-main": [58, 42],
       "comparer-grid": [50, 50],
@@ -263,6 +263,10 @@ const UILayout = {
       tabOrder: migrateNavOrder(Array.isArray(saved.tabOrder) ? saved.tabOrder : [], this.defaults.tabOrder),
       uiLocked: !!saved.uiLocked,
     };
+    const rep = this.data.splits["rep-layout"];
+    if (Array.isArray(rep) && rep.length === 3 && rep[0] === 38 && rep[1] === 38 && rep[2] === 24) {
+      this.data.splits["rep-layout"] = this.defaults.splits["rep-layout"].slice();
+    }
   },
   save() {
     try { localStorage.setItem(this.key, JSON.stringify(this.data)); } catch (_) {}
@@ -690,7 +694,7 @@ function showSub(group, name) {
 }
 
 const fmtBytes = (n) => n < 1024 ? `${n}B` : n < 1048576 ? `${(n/1024).toFixed(1)}k` : `${(n/1048576).toFixed(1)}M`;
-const esc = (s) => String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+const esc = (s) => String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;");
 const statusClass = (c) => !c ? "" : c >= 400 ? "status-red" : c >= 300 ? "status-3" : "status-ok";
 
 let lastStatus = null;
@@ -985,7 +989,7 @@ const repeater = { tabs: [], active: 0, seq: 0 };
 function newRepeaterTab(raw) {
   repeater.seq++;
   const def = "GET / HTTP/1.1\r\nHost: example.com\r\nUser-Agent: AURA/0.1\r\nAccept: */*\r\n\r\n";
-  const tab = { id: repeater.seq, name: String(repeater.seq), raw: raw || def, scheme: "https", target: "", response: "" };
+  const tab = { id: repeater.seq, name: String(repeater.seq), raw: raw || def, scheme: "https", response: "" };
   repeater.tabs.push(tab);
   repeater.active = repeater.tabs.length - 1;
   renderRepTabs(); renderRepTab();
@@ -1002,12 +1006,22 @@ function renderRepTabs() {
   </div>`).join("");
 }
 function curRep() { return repeater.tabs[repeater.active]; }
+function repHostFromRaw(raw) {
+  const m = /^\s*Host:[ \t]*([^\r\n\s]+)/im.exec(raw || "");
+  return m ? m[1] : "";
+}
+function updateRepTargetView() {
+  const el = $("#repTargetView"); if (!el) return;
+  const host = repHostFromRaw($("#repReq").value);
+  el.textContent = host ? $("#repScheme").value + "://" + host : "";
+  el.title = ($("#repScheme").value + "://" + host) || tr("rep.targetFromHost");
+}
 function renderRepTab() {
   const t = curRep(); if (!t) return;
   $("#repReq").value = t.raw;
   $("#repScheme").value = t.scheme;
-  $("#repTarget").value = t.target;
   $("#repResp").textContent = t.response;
+  updateRepTargetView();
   renderInspector($("#repInspector"), t.raw);
 }
 $("#repTabList").addEventListener("click", (e) => {
@@ -1018,9 +1032,8 @@ $("#repTabList").addEventListener("click", (e) => {
   renderRepTabs(); renderRepTab();
 });
 $("#btnRepNewTab").addEventListener("click", () => newRepeaterTab(""));
-$("#repReq").addEventListener("input", () => { const t = curRep(); if (t) { t.raw = $("#repReq").value; renderInspector($("#repInspector"), t.raw); } });
-$("#repScheme").addEventListener("change", () => { const t = curRep(); if (t) t.scheme = $("#repScheme").value; });
-$("#repTarget").addEventListener("input", () => { const t = curRep(); if (t) t.target = $("#repTarget").value; });
+$("#repReq").addEventListener("input", () => { const t = curRep(); if (t) { t.raw = $("#repReq").value; renderInspector($("#repInspector"), t.raw); updateRepTargetView(); } });
+$("#repScheme").addEventListener("change", () => { const t = curRep(); if (t) t.scheme = $("#repScheme").value; updateRepTargetView(); });
 
 $("#btnSend").addEventListener("click", async () => {
   const t = curRep(); if (!t) return;
@@ -1033,7 +1046,7 @@ $("#btnSend").addEventListener("click", async () => {
       fn: (signal) => api("/api/repeater", {
         method: "POST",
         signal,
-        body: JSON.stringify({ raw: $("#repReq").value, scheme: $("#repScheme").value, target: $("#repTarget").value.trim() || null }),
+        body: JSON.stringify({ raw: $("#repReq").value, scheme: $("#repScheme").value, target: null }),
       }),
     });
     if (!data || data.aborted) return;
@@ -1046,7 +1059,7 @@ $("#btnSend").addEventListener("click", async () => {
 $("#btnRepToComparer").addEventListener("click", () => { const t = curRep(); if (!t) return; $("#cmpA").value = t.raw; $("#cmpB").value = t.response; showView("comparer"); });
 $("#btnRepToOrganizer").addEventListener("click", () => { const t = curRep(); if (!t) return; sendToOrganizer(t.raw, t.response, "repeater"); });
 $("#btnRepToIntruder").addEventListener("click", () => { const t = curRep(); if (!t) return; showView("intruder"); newIntruderTab(t.raw); });
-$("#btnRepToScanner").addEventListener("click", () => { const t = curRep(); if (!t) return; showView("scanner"); $("#scanRaw").value = t.raw; $("#scanScheme").value = t.scheme; $("#scanTarget").value = t.target; });
+$("#btnRepToScanner").addEventListener("click", () => { const t = curRep(); if (!t) return; showView("scanner"); $("#scanRaw").value = t.raw; $("#scanScheme").value = t.scheme; $("#scanTarget").value = repHostFromRaw(t.raw); });
 
 $$(".codec-btns button[data-act]").forEach((b) => b.addEventListener("click", async () => {
   $("#codecErr").textContent = "";
@@ -1925,6 +1938,7 @@ const MAP_STAGE_DEFAULTS = {
   scrape: { timeout_sec: 12, follow_js: 8, same_host: true },
   dirs: { timeout_sec: 8, workers: 16, rps: 25, hide: "404", wordlist: "" },
   params: { timeout_sec: 8, workers: 10, rps: 15, hide: "404", wordlist: "" },
+  vulnscan: { timeout_sec: 600, workers: 25, rps: 150, limit: 500, severity: "medium,high,critical", tags: "" },
 };
 
 function mapStageOpts(id) {
@@ -2002,6 +2016,14 @@ function mapStageFields(id, busy) {
         + stageField(tr("map.opt.seclists"), text("wordlist_path", o.wordlist_path || "", `placeholder="Discovery/Web-Content/burp-parameter-names.txt"`))
         + stageField(tr("map.opt.wordlist"), area("wordlist", o.wordlist, tr("map.opt.wordlistParamPh")));
       break;
+    case "vulnscan":
+      fields = stageField(tr("map.opt.timeout"), num("timeout_sec", o.timeout_sec, "min=\"30\" max=\"3600\""))
+        + stageField(tr("map.opt.workers"), num("workers", o.workers, "min=\"1\" max=\"200\""))
+        + stageField(tr("map.opt.rps"), num("rps", o.rps, "min=\"1\" max=\"1000\""))
+        + stageField(tr("field.severity"), text("severity", o.severity || "", `placeholder="medium,high,critical"`))
+        + stageField(tr("field.tags"), text("tags", o.tags || ""))
+        + stageField(tr("map.opt.limit"), num("limit", o.limit, "min=\"1\" max=\"5000\""));
+      break;
     default:
       return "";
   }
@@ -2012,7 +2034,7 @@ function readStageForm(card) {
   const el = (n) => card.querySelector(`[name="${n}"]`);
   const num = (n) => {
     const node = el(n);
-    if (!node) return undefined;
+    if (!node || node.value.trim() === "") return undefined;
     const x = Number(node.value);
     return Number.isFinite(x) ? x : undefined;
   };
@@ -2066,7 +2088,16 @@ function readStageForm(card) {
       o.wordlist_path = text("wordlist_path");
       o.hide = text("hide").split(/[,\s]+/).map(Number).filter((n) => n > 0);
       break;
+    case "vulnscan":
+      o.timeout_sec = num("timeout_sec");
+      o.workers = num("workers");
+      o.rps = num("rps");
+      o.severity = text("severity");
+      o.tags = text("tags");
+      o.limit = num("limit");
+      break;
   }
+  Object.keys(o).forEach((k) => { if (o[k] === undefined) delete o[k]; });
   return o;
 }
 
@@ -2074,6 +2105,7 @@ function collectMapOpts() {
   const out = { ...(mapState.opts || {}) };
   $$("#view-map .map-stage-page[data-stage]").forEach((card) => {
     if (!card.dataset.stage) return;
+    if (!card.querySelector("[name]")) return; // pane not rendered yet — nothing to collect
     out[card.dataset.stage] = { ...(out[card.dataset.stage] || {}), ...readStageForm(card) };
   });
   mapState.opts = out;
@@ -2258,7 +2290,7 @@ function displayMapHost(h, base) {
 
 function mapCatalog() {
   if (mapState.catalog && mapState.catalog.length) return mapState.catalog;
-  return ["subdomains_passive", "dns_brute", "live_hosts", "web_ports", "tech", "urls_passive", "scrape", "dirs", "params"]
+  return ["subdomains_passive", "dns_brute", "live_hosts", "web_ports", "tech", "urls_passive", "scrape", "dirs", "params", "vulnscan"]
     .map((id) => ({ id, mode: id === "subdomains_passive" || id === "urls_passive" ? "passive" : "active" }));
 }
 
@@ -2269,6 +2301,32 @@ function syncMapSubtabBusy() {
     const running = Jobs.running(mapJobId(id));
     b.classList.toggle("is-busy", running);
   });
+}
+
+function renderVulnFindings(status) {
+  if (status !== "done" && status !== "error") return "";
+  const items = (mapState.artifacts || []).filter((a) => a.kind === "vuln");
+  if (!items.length) {
+    return `<div class="vuln-findings"><p class="muted">${esc(tr("map.vulnEmpty"))}</p></div>`;
+  }
+  const rows = items.map((a) => {
+    const x = a.extra || {};
+    const sev = String(x.severity || "info").toLowerCase();
+    const matched = String(x.matched || "");
+    return `<tr>
+      <td><span class="sev-${esc(sev)}">${esc(x.severity || "")}</span></td>
+      <td>${esc(x.name || a.value || "")}</td>
+      <td title="${esc(matched)}">${esc(clipText(matched, 80))}</td>
+      <td class="vuln-tpl">${esc(a.value || "")}</td>
+    </tr>`;
+  }).join("");
+  return `<div class="vuln-findings">
+    <h3>${esc(tr("map.vulnFindings"))} (${items.length})</h3>
+    <div class="table-wrap"><table>
+      <thead><tr><th>${esc(tr("issue.severity"))}</th><th>${esc(tr("map.vulnName"))}</th><th>${esc(tr("map.vulnMatched"))}</th><th>${esc(tr("map.vulnTpl"))}</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
 }
 
 function renderMapStagePanes() {
@@ -2305,7 +2363,8 @@ function renderMapStagePanes() {
         ${c.id === "dirs" ? `<button type="button" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
         ${c.id === "params" ? `<button type="button" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
       </div>
-      <pre class="map-log map-stage-log" data-empty="${esc(tr("map.logIdle"))}"></pre>`;
+      <pre class="map-log map-stage-log" data-empty="${esc(tr("map.logIdle"))}"></pre>
+      ${c.id === "vulnscan" ? renderVulnFindings(status) : ""}`;
   });
   syncMapSubtabBusy();
   MapLog.render();
@@ -2354,6 +2413,24 @@ $("#btnMapClear")?.addEventListener("click", () => {
   if ($("#mapAuth")) $("#mapAuth").checked = false;
   clearMapWorkspace();
 });
+async function createMapTargetFromForm() {
+  setWork(tr("map.starting"));
+  const data = await api("/api/intel/targets", {
+    method: "POST",
+    body: JSON.stringify({ target: $("#mapTarget").value.trim(), authorized: $("#mapAuth").checked }),
+  });
+  renderMapSnapshot(data);
+  setWork(tr("map.ingesting"));
+  MapLog.append({ msg: tr("map.ingesting") });
+  let n = 0;
+  try {
+    const ing = await api(`/api/intel/targets/${data.target.id}/ingest-history`, { method: "POST" });
+    n = ing.ingested || 0;
+    renderMapSnapshot(ing);
+  } catch (_) {}
+  $("#mapMeta").textContent = tr("map.startedOk", { host: data.target.base_url || data.target.domain || "", n });
+}
+
 $("#mapForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   if (!$("#mapTarget").value.trim()) {
@@ -2362,26 +2439,100 @@ $("#mapForm").addEventListener("submit", async (e) => {
   }
   const startBtn = $("#btnMapStart");
   markBusy(startBtn, true, tr("map.starting"));
-  setWork(tr("map.starting"));
   try {
-    const data = await api("/api/intel/targets", {
-      method: "POST",
-      body: JSON.stringify({ target: $("#mapTarget").value.trim(), authorized: $("#mapAuth").checked }),
-    });
-    renderMapSnapshot(data);
-    setWork(tr("map.ingesting"));
-    MapLog.append({ msg: tr("map.ingesting") });
-    let n = 0;
-    try {
-      const ing = await api(`/api/intel/targets/${data.target.id}/ingest-history`, { method: "POST" });
-      n = ing.ingested || 0;
-      renderMapSnapshot(ing);
-    } catch (_) {}
-    $("#mapMeta").textContent = tr("map.startedOk", { host: data.target.base_url || data.target.domain || "", n });
+    await createMapTargetFromForm();
     showSub("#view-map", "sitemap");
   } catch (err) { uiFlash(err.message); }
   finally {
     markBusy(startBtn, false);
+    Jobs.syncBar();
+  }
+});
+
+const MAP_PIPELINE = ["subdomains_passive", "urls_passive", "dns_brute", "live_hosts", "web_ports", "tech", "scrape", "dirs", "params", "vulnscan"];
+
+async function runMapStage(stageId) {
+  if (!mapState.target) return { skipped: true };
+  const jobId = mapJobId(stageId);
+  if (Jobs.running(jobId)) return { skipped: true };
+  collectMapOpts();
+  const opts = { ...(mapState.opts && mapState.opts[stageId]) || {} };
+  const hint = tr("map.stageWork." + stageId);
+  const label = hint && hint !== "map.stageWork." + stageId ? hint : tr("map.stageWorking");
+  const signal = Jobs.start(jobId, label);
+  MapLog.append({ stage: stageId, action: "start", host: mapState.target.domain || mapState.target.base_url || "" });
+  mapState.stages = [...(mapState.stages || []).filter((s) => s.id !== stageId), { id: stageId, status: "running", summary: "" }];
+  renderMapSnapshot(mapState);
+  try {
+    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${stageId}`, {
+      method: "POST",
+      signal,
+      body: JSON.stringify(opts),
+    });
+    Jobs.finish(jobId);
+    renderMapSnapshot(data);
+    if (data.stopped) $("#mapMeta").textContent = tr("work.stopped");
+    else if (data.error) {
+      MapLog.append({ stage: stageId, action: "err", err: data.error, host: mapState.target.domain || "" });
+      $("#mapMeta").textContent = clipText(data.error, 180);
+    }
+    else $("#mapMeta").textContent = data.run?.stage?.summary || tr("map.startedOk", { host: mapState.target.domain, n: data.run?.added || 0 });
+    return { data };
+  } catch (err) {
+    Jobs.finish(jobId);
+    if (isAbortError(err)) {
+      $("#mapMeta").textContent = tr("work.stopped");
+      try {
+        const snap = await api(`/api/intel/targets/${mapState.target.id}`);
+        const stages = (snap.stages || []).map((s) => s.id === stageId && s.status === "running"
+          ? { ...s, status: "idle", summary: "stopped" } : s);
+        renderMapSnapshot({ ...snap, stages });
+      } catch (_) {
+        mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "idle", summary: "stopped" } : s);
+        renderMapSnapshot(mapState);
+      }
+      return { aborted: true };
+    }
+    uiFlash(err.message);
+    MapLog.append({ stage: stageId, action: "err", err: err.message });
+    mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "error", summary: err.message } : s);
+    renderMapSnapshot(mapState);
+    return { error: err };
+  }
+}
+
+async function runMapPipeline() {
+  const stages = MAP_PIPELINE.filter((id) => !Jobs.running(mapJobId(id)));
+  let ok = 0, failed = 0;
+  for (let i = 0; i < stages.length; i++) {
+    const id = stages[i];
+    if (!mapState.target) break;
+    $("#mapMeta").textContent = tr("map.runAllRunning", { stage: tr("stage." + id + ".title"), cur: i + 1, total: stages.length });
+    const r = await runMapStage(id);
+    if (!r || r.skipped) continue;
+    if (r.aborted) break;
+    if (r.error || !r.data || r.data.error || r.data.stopped) failed++;
+    else ok++;
+  }
+  $("#mapMeta").textContent = tr("map.runAllDone", { ok, failed });
+}
+
+$("#btnMapRunAll")?.addEventListener("click", async () => {
+  const btn = $("#btnMapRunAll");
+  if (!btn || btn.disabled) return;
+  if (!$("#mapTarget").value.trim()) {
+    clearMapWorkspace();
+    return;
+  }
+  btn.disabled = true;
+  try {
+    if (!mapState.target) {
+      try { await createMapTargetFromForm(); }
+      catch (err) { uiFlash(err.message); return; }
+    }
+    if (mapState.target) await runMapPipeline();
+  } finally {
+    btn.disabled = false;
     Jobs.syncBar();
   }
 });
@@ -2412,51 +2563,7 @@ $("#view-map").addEventListener("click", async (e) => {
   }
   const btn = e.target.closest("[data-run]");
   if (!btn || !mapState.target || btn.disabled) return;
-  const stageId = btn.dataset.run;
-  const jobId = mapJobId(stageId);
-  if (Jobs.running(jobId)) return;
-  collectMapOpts();
-  const opts = { ...(mapState.opts && mapState.opts[stageId]) || {} };
-  const hint = tr("map.stageWork." + stageId);
-  const label = hint && hint !== "map.stageWork." + stageId ? hint : tr("map.stageWorking");
-  const signal = Jobs.start(jobId, label);
-  MapLog.append({ stage: stageId, action: "start", host: mapState.target.domain || mapState.target.base_url || "" });
-  mapState.stages = [...(mapState.stages || []).filter((s) => s.id !== stageId), { id: stageId, status: "running", summary: "" }];
-  renderMapSnapshot(mapState);
-  try {
-    const data = await api(`/api/intel/targets/${mapState.target.id}/stages/${stageId}`, {
-      method: "POST",
-      signal,
-      body: JSON.stringify(opts),
-    });
-    Jobs.finish(jobId);
-    renderMapSnapshot(data);
-    if (data.stopped) $("#mapMeta").textContent = tr("work.stopped");
-    else if (data.error) {
-      MapLog.append({ stage: stageId, action: "err", err: data.error, host: mapState.target.domain || "" });
-      $("#mapMeta").textContent = clipText(data.error, 180);
-    }
-    else $("#mapMeta").textContent = data.run?.stage?.summary || tr("map.startedOk", { host: mapState.target.domain, n: data.run?.added || 0 });
-  } catch (err) {
-    Jobs.finish(jobId);
-    if (isAbortError(err)) {
-      $("#mapMeta").textContent = tr("work.stopped");
-      try {
-        const snap = await api(`/api/intel/targets/${mapState.target.id}`);
-        const stages = (snap.stages || []).map((s) => s.id === stageId && s.status === "running"
-          ? { ...s, status: "idle", summary: "stopped" } : s);
-        renderMapSnapshot({ ...snap, stages });
-      } catch (_) {
-        mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "idle", summary: "stopped" } : s);
-        renderMapSnapshot(mapState);
-      }
-      return;
-    }
-    uiFlash(err.message);
-    MapLog.append({ stage: stageId, action: "err", err: err.message });
-    mapState.stages = (mapState.stages || []).map((s) => s.id === stageId ? { ...s, status: "error", summary: err.message } : s);
-    renderMapSnapshot(mapState);
-  }
+  await runMapStage(btn.dataset.run);
 });
 $("#btnMapHistory").addEventListener("click", async () => {
   if (!mapState.target) return;

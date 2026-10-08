@@ -532,7 +532,7 @@ main {
 .issues-list { display: flex; flex-direction: column; gap: 4px; }
 .issues-detail { overflow: auto; }
 .issues-detail h3 { margin: 14px 0 4px; }
-.sev-high { color: var(--bad); } .sev-medium { color: var(--accent); } .sev-low { color: var(--wait); } .sev-info { color: var(--muted); }
+.sev-high { color: var(--bad); } .sev-medium { color: var(--accent); } .sev-low { color: var(--wait); } .sev-info { color: var(--muted); } .sev-critical { color: #b30000; font-weight: 600; }
 .row { display: flex; gap: 10px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
 label { display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-label); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
 label.check, label.toggle, .map-auth { letter-spacing: 0; text-transform: none; font-size: var(--fs-ui); }
@@ -644,6 +644,24 @@ button.danger { background: var(--danger-bg); color: var(--danger-text); border-
   max-width: 420px;
   height: 34px;
   max-height: 34px;
+  padding-top: 0;
+  padding-bottom: 0;
+  line-height: 32px;
+}
+.toolbar > select#repScheme {
+  flex: 0 0 auto;
+  min-width: 86px;
+  max-width: 110px;
+}
+.rep-target {
+  align-self: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 280px;
+  min-width: 0;
 }
 .toolbar > .tb-field {
   flex: 0 0 auto;
@@ -800,6 +818,7 @@ tbody tr.sel { background: var(--sel); }
 .seq-pos-table th, .seq-pos-table td { padding: 3px 6px; border-bottom: 1px solid var(--line); text-align: left; }
 .rep-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(180px, 220px); grid-template-rows: minmax(0, 1fr); gap: 8px; flex: 1; min-height: 0; min-width: 0; }
 .rep-layout > * { min-width: 0; min-height: 0; }
+.rep-layout > .split-pane:last-child { max-width: 320px; }
 .rep-layout textarea.raw, .rep-layout .raw-view { min-height: 0; height: 100%; resize: none; }
 .rep-layout .inspector { overflow: auto; }
 .rep-tab { background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 6px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: var(--fs-ui); white-space: nowrap; }
@@ -950,6 +969,11 @@ button.mini.danger:hover { border-color: var(--danger-line); color: var(--danger
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
 }
 .map-stage-log { min-height: 160px; }
+.vuln-findings { margin-top: 10px; }
+.vuln-findings h3 { margin: 10px 0 6px; }
+.vuln-findings .table-wrap { max-height: 320px; flex: none; }
+.vuln-findings tbody tr { cursor: default; }
+.vuln-findings .vuln-tpl { font-family: var(--mono); font-size: 11px; }
 .map-title { margin: 0 0 6px; }
 .map-form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; flex: 1; min-width: 280px; }
 .map-form #mapTarget { flex: 1; min-width: 220px; padding: 10px 14px; border-radius: 0; }
