@@ -29,11 +29,11 @@ type Interaction struct {
 // Server listens for inbound HTTP requests and stores them keyed by request ID.
 type Server struct {
 	port         int
-	interactions *sync.Map
+	mu           sync.Mutex
+	interactions map[string][]Interaction
 	logger       *zap.Logger
 	httpServer   *http.Server
 	listener     net.Listener
-	mu           sync.Mutex
 }
 
 // NewServer creates a callback server bound to port (0 = random free port).
@@ -43,7 +43,7 @@ func NewServer(port int, logger *zap.Logger) *Server {
 	}
 	return &Server{
 		port:         port,
-		interactions: &sync.Map{},
+		interactions: map[string][]Interaction{},
 		logger:       logger,
 	}
 }
@@ -134,9 +134,9 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		Body:       string(body),
 	}
 
-	actual, _ := s.interactions.LoadOrStore(requestID, []Interaction{})
-	updated := append(actual.([]Interaction), interaction)
-	s.interactions.Store(requestID, updated)
+	s.mu.Lock()
+	s.interactions[requestID] = append(s.interactions[requestID], interaction)
+	s.mu.Unlock()
 
 	s.logger.Debug("callback hit",
 		zap.String("request_id", requestID),
@@ -168,9 +168,13 @@ func (s *Server) GetInteractions(requestID string) []Interaction {
 	if requestID == "" {
 		return nil
 	}
-	v, ok := s.interactions.Load(requestID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	items, ok := s.interactions[requestID]
 	if !ok {
 		return nil
 	}
-	return v.([]Interaction)
+	out := make([]Interaction, len(items))
+	copy(out, items)
+	return out
 }

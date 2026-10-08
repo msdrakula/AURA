@@ -97,12 +97,6 @@ type Pending struct {
 	once      sync.Once
 }
 
-func (p *Pending) complete(action, raw string) {
-	p.Action = action
-	p.EditedRaw = raw
-	p.once.Do(func() { close(p.done) })
-}
-
 type LogItem struct {
 	Ts      float64 `json:"ts"`
 	Level   string  `json:"level"`
@@ -267,12 +261,14 @@ func (s *Store) Intercept(flow *Flow, phase string) string {
 
 func (s *Store) Decide(id, action, raw string) bool {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	p := s.pending[id]
-	s.mu.Unlock()
 	if p == nil {
 		return false
 	}
-	p.complete(action, raw)
+	p.Action = action
+	p.EditedRaw = raw
+	p.once.Do(func() { close(p.done) })
 	return true
 }
 
