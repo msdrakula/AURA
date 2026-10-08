@@ -57,6 +57,12 @@ func Catalog() []CatalogStage {
 			Hint:  "Перебор query-параметров на базовом URL. Трекинг (utm, fbclid) не считается находкой.",
 			Mode:  ModeActive,
 		},
+		{
+			ID:    "vulnscan",
+			Title: "Уязвимости",
+			Hint:  "Nuclei: проверка живых хостов по шаблонам (14k+ темплейтов). Severity, теги, rate-limit — в настройках.",
+			Mode:  ModeActive,
+		},
 	}
 }
 

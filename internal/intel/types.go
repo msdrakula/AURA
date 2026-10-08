@@ -13,6 +13,7 @@ const (
 	KindJS        = "js"
 	KindTech      = "tech"
 	KindNote      = "note"
+	KindVuln      = "vuln"
 )
 
 const (
@@ -78,6 +79,8 @@ type StageOptions struct {
 	FollowJS     int      `json:"follow_js,omitempty"`
 	Schemes      []string `json:"schemes,omitempty"`
 	Hide         []int    `json:"hide,omitempty"`
+	Tags         string   `json:"tags,omitempty"`
+	Severity     string   `json:"severity,omitempty"`
 }
 
 func (o StageOptions) timeout(def int) int {

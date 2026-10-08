@@ -185,6 +185,8 @@ func (e *Engine) RunStage(ctx context.Context, targetID, stageID string, opts ..
 		added, runErr = e.dirs(ctx, t, opt)
 	case "params":
 		added, runErr = e.params(ctx, t, opt)
+	case "vulnscan":
+		added, runErr = e.vulnscan(ctx, t, arts, opt)
 	default:
 		runErr = fmt.Errorf("stage not implemented")
 	}
