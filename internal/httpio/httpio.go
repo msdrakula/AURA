@@ -413,6 +413,9 @@ func ReadBody(r *bufio.Reader, headers []Header, allowUntilEOF bool) ([]byte, er
 		}
 		return []byte{}, nil
 	}
+	if length < 0 {
+		return nil, fmt.Errorf("invalid negative content length: %d", length)
+	}
 	if length > MaxBody {
 		return nil, errors.New("body too large")
 	}

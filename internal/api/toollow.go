@@ -12,6 +12,11 @@ import (
 	"meb/internal/models"
 )
 
+func normalizeCRLF(raw string) string {
+	raw = strings.ReplaceAll(raw, "\r\n", "\n")
+	return strings.ReplaceAll(raw, "\n", "\r\n")
+}
+
 // saveToolFlow builds an HTTPTransaction from a raw request/response and
 // persists it to history with a source tag (e.g. "repeater", "intruder",
 // "scanner", "discover"). This makes every tool-sent request appear in the
@@ -31,7 +36,7 @@ func (s *Server) saveToolFlow(reqRaw, respRaw, scheme, source string) {
 		},
 	}
 	// Parse request
-	head, body := httpio.SplitHeadBody([]byte(strings.ReplaceAll(reqRaw, "\n", "\r\n")))
+	head, body := httpio.SplitHeadBody([]byte(normalizeCRLF(reqRaw)))
 	start, hdrs := httpio.ParseHeaders(head)
 	parts := strings.Fields(start)
 	if len(parts) >= 1 {
@@ -61,7 +66,7 @@ func (s *Server) saveToolFlow(reqRaw, respRaw, scheme, source string) {
 	tx.Request.Body = body
 	// Parse response
 	if respRaw != "" {
-		rhead, rbody := httpio.SplitHeadBody([]byte(strings.ReplaceAll(respRaw, "\n", "\r\n")))
+		rhead, rbody := httpio.SplitHeadBody([]byte(normalizeCRLF(respRaw)))
 		rstart, rhdrs := httpio.ParseHeaders(rhead)
 		rparts := strings.Fields(rstart)
 		status := 0

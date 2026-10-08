@@ -291,6 +291,21 @@ func isPrintable(b []byte) bool {
 	return printable*100/len(b) > 80
 }
 
+// MaxDecompressed bounds the amount of data a single gzip/deflate payload may
+// expand to, protecting the proxy against compression bombs.
+const MaxDecompressed = 256 * 1024 * 1024
+
+func readAllDecompressed(r io.Reader) ([]byte, error) {
+	out, err := io.ReadAll(io.LimitReader(r, MaxDecompressed+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(out)) > MaxDecompressed {
+		return nil, fmt.Errorf("decompressed body exceeds %d bytes", MaxDecompressed)
+	}
+	return out, nil
+}
+
 // UnwrapBody replaces a gzip/deflate payload with the decoded bytes and
 // drops Content-Encoding / Transfer-Encoding so the body can be shown as-is.
 func UnwrapBody(resp *httpio.Response) {
@@ -317,7 +332,7 @@ func MaybeDecompress(body []byte, encoding string) ([]byte, bool) {
 			return body, false
 		}
 		defer zr.Close()
-		out, err := io.ReadAll(zr)
+		out, err := readAllDecompressed(zr)
 		if err != nil {
 			return body, false
 		}
@@ -325,7 +340,7 @@ func MaybeDecompress(body []byte, encoding string) ([]byte, bool) {
 	}
 	if strings.Contains(enc, "deflate") {
 		if zr, err := zlib.NewReader(bytes.NewReader(body)); err == nil {
-			out, err := io.ReadAll(zr)
+			out, err := readAllDecompressed(zr)
 			zr.Close()
 			if err == nil {
 				return out, true
@@ -339,7 +354,7 @@ func MaybeDecompress(body []byte, encoding string) ([]byte, bool) {
 func inflateRaw(body []byte) ([]byte, bool) {
 	r := flate.NewReader(bytes.NewReader(body))
 	defer r.Close()
-	out, err := io.ReadAll(r)
+	out, err := readAllDecompressed(r)
 	if err != nil {
 		return body, false
 	}
