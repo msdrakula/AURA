@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"fmt"
+	"html"
 	"strconv"
 	"strings"
 
@@ -11,7 +12,7 @@ import (
 func errorPage(status int, message string) []byte {
 	body := []byte(fmt.Sprintf(
 		"<html><body style='font-family:sans-serif;background:#111;color:#eee;padding:24px'><h1>AURA %d</h1><pre>%s</pre></body></html>",
-		status, message,
+		status, html.EscapeString(message),
 	))
 	head := fmt.Sprintf(
 		"HTTP/1.1 %d Error\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: %d\r\nConnection: close\r\n\r\n",

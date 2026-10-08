@@ -212,6 +212,16 @@ func (s *Server) accept(ctx context.Context, ln net.Listener) {
 }
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			_ = conn.Close()
+			if s.rt != nil {
+				s.rt.Log("error", fmt.Sprintf("%s: %v", conn.RemoteAddr().String(), rec))
+				s.rt.IncErrors()
+			}
+			s.log.Error("proxy panic", zap.String("client", conn.RemoteAddr().String()), zap.Any("recover", rec))
+		}
+	}()
 	defer conn.Close()
 	client := conn.RemoteAddr().String()
 	if err := conn.SetDeadline(time.Now().Add(s.idle)); err != nil {
@@ -222,15 +232,6 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	if err != nil || req == nil {
 		return
 	}
-	defer func() {
-		if rec := recover(); rec != nil {
-			if s.rt != nil {
-				s.rt.Log("error", fmt.Sprintf("%s: %v", client, rec))
-				s.rt.IncErrors()
-			}
-			s.log.Error("proxy panic", zap.String("client", client), zap.Any("recover", rec))
-		}
-	}()
 	if req.Method == "CONNECT" {
 		s.handleHTTPS(ctx, req, conn, br, client)
 		return
