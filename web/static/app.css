@@ -853,6 +853,46 @@ button.mini.danger:hover { border-color: var(--danger-line); color: var(--danger
 .disc-results { display: flex; flex-direction: column; gap: 8px; min-height: 0; }
 .disc-results .table-wrap { flex: 1; min-height: 0; }
 
+/* Fuzz console — gobuster-style live output */
+.status-warn { color: var(--wait); }
+.fuzz-console {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--line-soft);
+  padding: 10px 12px;
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.fuzz-console .fx-rule { color: var(--muted); }
+.fuzz-console .fx-title { font-weight: 700; letter-spacing: .04em; }
+.fuzz-console .fx-k { color: var(--muted); }
+.fuzz-console .fx-v { color: var(--text); }
+.fuzz-console .fx-plus { color: var(--ok); font-weight: 700; }
+.fuzz-console .fx-path { color: var(--text); font-weight: 600; }
+.fuzz-console .fx-size { color: var(--muted); }
+.fuzz-console .fx-res { white-space: pre-wrap; }
+.fuzz-console .fx-footer { margin-top: 8px; padding-top: 6px; border-top: 1px dashed var(--line-soft); color: var(--muted); }
+
+/* Status-code hide chips */
+.chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.chip {
+  font-family: var(--mono);
+  font-size: var(--fs-mono);
+  padding: 1px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: var(--bg-2);
+  cursor: pointer;
+  color: var(--text);
+}
+.chip:hover { border-color: var(--muted); }
+.chip.off { color: var(--muted); background: transparent; text-decoration: line-through; border-style: dashed; }
+
 /* Scanner */
 .scan-layout { display: grid; grid-template-columns: minmax(240px, 0.36fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 12px; flex: 1; min-height: 0; min-width: 0; }
 .scan-layout > * { min-width: 0; min-height: 0; }
@@ -945,10 +985,9 @@ button.mini.danger:hover { border-color: var(--danger-line); color: var(--danger
   border-bottom: 0;
 }
 #view-map .map-bar #mapTarget { flex: 1; min-width: 180px; }
-#view-map [data-subpane="sitemap"] { overflow: hidden; }
-#view-map [data-subpane]:not([data-subpane="sitemap"]) { overflow: auto; }
-#view-map [data-subpane="sitemap"] .sitemap .map-detail,
-#view-map [data-subpane="sitemap"] .sitemap .map-log {
+#view-map [data-subpane] { overflow: auto; }
+#view-sitemap .sitemap .map-detail,
+#view-sitemap .sitemap .map-log {
   height: 100%;
   max-height: none;
   min-height: 0;
@@ -1207,10 +1246,10 @@ button.mini.danger:hover { border-color: var(--danger-line); color: var(--danger
 #view-comparer,
 #view-sequencer,
 #view-organizer,
-#view-discover,
 #view-fuzz,
 #view-scanner,
 #view-map,
+#view-sitemap,
 #view-proxy,
 #view-scope,
 #view-other {

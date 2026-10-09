@@ -17,7 +17,6 @@ func TestActiveToolsRequireLabConfirm(t *testing.T) {
 		path string
 		body string
 	}{
-		{"discover", "/api/discover/run", `{"base_url":"https://lab.local","wordlist":["admin"]}`},
 		{"fuzz", "/api/fuzz/run", `{"url":"https://lab.local/FUZZ","wordlist":["a"]}`},
 		{"scanner", "/api/scanner/scan", "{\"raw\":\"GET / HTTP/1.1\\r\\nHost: lab.local\\r\\n\\r\\n\"}"},
 	}

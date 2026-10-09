@@ -10,7 +10,7 @@ import (
 
 	"go.uber.org/zap"
 
-	"meb/internal/fuzz"
+	"meb/internal/ffuf"
 	"meb/internal/intel"
 	"meb/internal/wordlist"
 )
@@ -167,15 +167,17 @@ func errString(err error) string {
 }
 
 type fuzzBody struct {
+	Mode         string            `json:"mode"` // "fuzz" (FUZZ keyword anywhere) or "paths" (dirbust: FUZZ appended to base URL)
 	URL          string            `json:"url"`
 	Method       string            `json:"method"`
 	Headers      map[string]string `json:"headers"`
+	Cookies      string            `json:"cookies"`
 	Body         string            `json:"body"`
 	Wordlist     []string          `json:"wordlist"`
 	WordlistPath string            `json:"wordlist_path"`
 	Workers      int               `json:"workers"`
 	RPS          int               `json:"rps"`
-	Hide         []int             `json:"hide"`
+	Timeout      int               `json:"timeout"`
 	WordlistName string            `json:"wordlist_name"`
 	Authorized   bool              `json:"authorized"`
 }
@@ -209,39 +211,115 @@ func (s *Server) fuzzRun(w http.ResponseWriter, r *http.Request) {
 	if rejectUnlessAuthorized(w, body.Authorized) {
 		return
 	}
-	words, err := s.resolveWords(body.Wordlist, body.WordlistPath, body.WordlistName)
+	if ffuf.LookPath() == "" {
+		writeErr(w, 500, "ffuf binary not found — install: sudo apt install ffuf")
+		return
+	}
+	url := strings.TrimSpace(body.URL)
+	if url == "" {
+		writeErr(w, 400, "url is required")
+		return
+	}
+	if body.Mode == "paths" {
+		url = strings.TrimRight(url, "/") + "/FUZZ"
+	}
+	kind := body.WordlistName
+	if kind == "" {
+		kind = "params"
+		if body.Mode == "paths" {
+			kind = "dirs"
+		}
+	}
+	words, err := s.resolveWords(body.Wordlist, body.WordlistPath, kind)
 	if err != nil {
 		writeErr(w, 400, err.Error())
 		return
 	}
+	if len(words) == 0 {
+		writeErr(w, 400, "wordlist is required")
+		return
+	}
+	headers := make([]string, 0, len(body.Headers))
+	for k, v := range body.Headers {
+		headers = append(headers, k+": "+v)
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Minute)
 	defer cancel()
-	s.Log.Info("fuzz: run", zap.String("url", body.URL), zap.Int("words", len(words)), zap.Int("workers", body.Workers))
-	hits, err := fuzz.Run(ctx, fuzz.Options{
-		URL:      body.URL,
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, 500, "streaming unsupported")
+		return
+	}
+	wlLabel := body.WordlistPath
+	if wlLabel == "" {
+		wlLabel = fmt.Sprintf("custom list (%d words)", len(words))
+	}
+	s.Log.Info("fuzz: run", zap.String("mode", body.Mode), zap.String("url", url), zap.Int("words", len(words)), zap.Int("workers", body.Workers))
+
+	started := time.Now()
+	w.Header().Set("Content-Type", "application/x-ndjson; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(200)
+	emit := func(v map[string]any) {
+		b, _ := json.Marshal(v)
+		_, _ = w.Write(append(b, '\n'))
+		flusher.Flush()
+	}
+	emit(map[string]any{
+		"type":    "start",
+		"mode":    body.Mode,
+		"url":     url,
+		"method":  mapDefault(body.Method, "GET"),
+		"wordlist": wlLabel,
+		"words":   len(words),
+		"workers": body.Workers,
+		"rps":     body.RPS,
+		"timeout": body.Timeout,
+	})
+
+	results, st, runErr := ffuf.Run(ctx, ffuf.Options{
+		URL:      url,
 		Method:   body.Method,
-		Headers:  body.Headers,
+		Headers:  headers,
+		Cookies:  body.Cookies,
 		Body:     body.Body,
 		Wordlist: words,
 		Workers:  body.Workers,
 		RPS:      body.RPS,
-		Hide:     body.Hide,
-		Timeout:  8 * time.Second,
+		Timeout:  body.Timeout,
+		OnResult: func(r ffuf.Result) {
+			emit(map[string]any{
+				"type":         "result",
+				"payload":      r.Payload,
+				"position":     r.Position,
+				"status":       r.Status,
+				"length":       r.Length,
+				"words":        r.Words,
+				"lines":        r.Lines,
+				"url":          r.URL,
+				"content_type": r.ContentType,
+				"redirect":     r.Redirect,
+				"duration_ms":  r.DurationMs,
+			})
+		},
 	})
-	if err != nil && len(hits) == 0 && ctx.Err() == nil {
-		writeErr(w, 400, err.Error())
-		return
-	}
-	if hits == nil {
-		hits = []fuzz.Hit{}
-	}
-	writeJSON(w, 200, map[string]any{
-		"items":     hits,
-		"count":     len(hits),
-		"tried":     len(words),
-		"truncated": len(hits) >= 8000,
-		"error":     errString(err),
+	emit(map[string]any{
+		"type":        "done",
+		"count":       len(results),
+		"tried":       st.Tried,
+		"errors":      st.Errors,
+		"truncated":   len(results) >= 20000,
+		"duration_ms": time.Since(started).Milliseconds(),
+		"error":       errString(runErr),
 	})
+}
+
+func mapDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
 }
 
 func (s *Server) wordlists(w http.ResponseWriter, _ *http.Request) {

@@ -15,8 +15,8 @@
       }
     } catch (e) {}
   </script>
-  <link rel="stylesheet" href="/static/fonts.css?v=63" />
-  <link rel="stylesheet" href="/static/app.css?v=63" />
+  <link rel="stylesheet" href="/static/fonts.css?v=70" />
+  <link rel="stylesheet" href="/static/app.css?v=70" />
 </head>
 <body>
 <div id="app">
@@ -55,34 +55,34 @@
   <div id="uiFlash" class="ui-flash hidden" role="status"></div>
 
   <nav class="tabs" id="mainTabs">
-    <button data-view="map" class="active" data-i18n="nav.map">Map</button>
+    <button data-view="map" class="hidden" hidden data-i18n="nav.map">Archive</button>
+    <button data-view="sitemap" class="active" data-i18n="nav.sitemap">Map</button>
     <button data-view="scope" data-i18n="nav.scope">Scope</button>
     <button data-view="proxy"><span data-i18n="nav.proxy">Proxy</span><span class="dot hidden" id="proxyDot"></span></button>
-    <button data-view="discover" data-i18n="nav.discover">Discover</button>
     <button data-view="fuzz" data-i18n="nav.fuzz">Fuzz</button>
     <button data-view="intruder" data-i18n="nav.intruder">Intruder</button>
     <button data-view="repeater" data-i18n="nav.repeater">Repeater</button>
     <button data-view="scanner" data-i18n="nav.scanner">Scanner</button>
     <button data-view="logger" data-i18n="nav.logger">Logger</button>
     <button data-view="decoder" data-i18n="nav.decoder">Decoder</button>
-    <button data-view="comparer" data-i18n="nav.comparer">Comparer</button>
-    <button data-view="sequencer" data-i18n="nav.sequencer">Sequencer</button>
-    <button data-view="collaborator" data-i18n="nav.collaborator">Collaborator</button>
-    <button data-view="organizer" data-i18n="nav.organizer">Organizer</button>
-    <button data-view="other" data-i18n="nav.other">Other</button>
+    <button data-view="comparer" class="hidden" hidden data-i18n="nav.comparer">Comparer</button>
+    <button data-view="sequencer" class="hidden" hidden data-i18n="nav.sequencer">Sequencer</button>
+    <button data-view="collaborator" class="hidden" hidden data-i18n="nav.collaborator">Collaborator</button>
+    <button data-view="organizer" class="hidden" hidden data-i18n="nav.organizer">Organizer</button>
+    <button data-view="other" class="hidden" hidden data-i18n="nav.other">Other</button>
     <button data-view="extensions" class="hidden" hidden data-i18n="nav.extensions">Extensions</button>
   </nav>
   <script>
     (function () {
       var ru = {
-        map: "Карта", scope: "Область", proxy: "Прокси", discover: "Пути", fuzz: "Фаззинг",
+        map: "Архив", sitemap: "Карта", scope: "Область", proxy: "Прокси", fuzz: "Фаззинг",
         intruder: "Перебор", repeater: "Повтор",
         scanner: "Сканер", logger: "Лог", decoder: "Декодер",
         comparer: "Сравнение", sequencer: "Токены",
         collaborator: "OOB-колбэк", organizer: "Коллекции", other: "Прочее", extensions: "Расширения"
       };
       var en = {
-        map: "Map", scope: "Scope", proxy: "Proxy", discover: "Discover", fuzz: "Fuzz",
+        map: "Archive", sitemap: "Map", scope: "Scope", proxy: "Proxy", fuzz: "Fuzz",
         intruder: "Intruder", repeater: "Repeater",
         scanner: "Scanner", logger: "Logger", decoder: "Decoder",
         comparer: "Comparer", sequencer: "Sequencer",
@@ -104,10 +104,9 @@
 
   <main>
     <!-- MAP / INTEL — nested like Proxy: Site map first, then one subtab per module -->
-    <section id="view-map" class="view">
+    <section id="view-map" class="view hidden">
       <nav class="subtabs" id="mapSubtabs">
-        <button data-sub="sitemap" class="active" data-i18n="map.sub.sitemap">Site map</button>
-        <button data-sub="subdomains_passive" data-i18n="stage.subdomains_passive.title">Subdomains</button>
+        <button data-sub="subdomains_passive" class="active" data-i18n="stage.subdomains_passive.title">Subdomains</button>
         <button data-sub="dns_brute" data-i18n="stage.dns_brute.title">DNS names</button>
         <button data-sub="live_hosts" data-i18n="stage.live_hosts.title">Live hosts</button>
         <button data-sub="web_ports" data-i18n="stage.web_ports.title">Web ports</button>
@@ -127,7 +126,21 @@
         <span id="mapMeta" class="muted"></span>
       </form>
 
-      <div data-subpane="sitemap" class="subpane">
+      <div data-subpane="subdomains_passive" class="subpane hidden"><div class="map-stage-page" data-stage="subdomains_passive"></div></div>
+      <div data-subpane="dns_brute" class="subpane hidden"><div class="map-stage-page" data-stage="dns_brute"></div></div>
+      <div data-subpane="live_hosts" class="subpane hidden"><div class="map-stage-page" data-stage="live_hosts"></div></div>
+      <div data-subpane="web_ports" class="subpane hidden"><div class="map-stage-page" data-stage="web_ports"></div></div>
+      <div data-subpane="tech" class="subpane hidden"><div class="map-stage-page" data-stage="tech"></div></div>
+      <div data-subpane="urls_passive" class="subpane hidden"><div class="map-stage-page" data-stage="urls_passive"></div></div>
+      <div data-subpane="scrape" class="subpane hidden"><div class="map-stage-page" data-stage="scrape"></div></div>
+      <div data-subpane="dirs" class="subpane hidden"><div class="map-stage-page" data-stage="dirs"></div></div>
+      <div data-subpane="params" class="subpane hidden"><div class="map-stage-page" data-stage="params"></div></div>
+      <div data-subpane="vulnscan" class="subpane hidden"><div class="map-stage-page" data-stage="vulnscan"></div></div>
+    </section>
+
+    <!-- SITE MAP -->
+    <section id="view-sitemap" class="view">
+      <div class="subpane">
         <div id="mapEmpty" class="map-empty">
           <p data-i18n="map.empty">Site map fills from proxy history and from every Map module you run. Start a host to run Subdomains, DNS, ports, and the rest.</p>
           <ol class="steps">
@@ -175,17 +188,6 @@
           </div>
         </div>
       </div>
-
-      <div data-subpane="subdomains_passive" class="subpane hidden"><div class="map-stage-page" data-stage="subdomains_passive"></div></div>
-      <div data-subpane="dns_brute" class="subpane hidden"><div class="map-stage-page" data-stage="dns_brute"></div></div>
-      <div data-subpane="live_hosts" class="subpane hidden"><div class="map-stage-page" data-stage="live_hosts"></div></div>
-      <div data-subpane="web_ports" class="subpane hidden"><div class="map-stage-page" data-stage="web_ports"></div></div>
-      <div data-subpane="tech" class="subpane hidden"><div class="map-stage-page" data-stage="tech"></div></div>
-      <div data-subpane="urls_passive" class="subpane hidden"><div class="map-stage-page" data-stage="urls_passive"></div></div>
-      <div data-subpane="scrape" class="subpane hidden"><div class="map-stage-page" data-stage="scrape"></div></div>
-      <div data-subpane="dirs" class="subpane hidden"><div class="map-stage-page" data-stage="dirs"></div></div>
-      <div data-subpane="params" class="subpane hidden"><div class="map-stage-page" data-stage="params"></div></div>
-      <div data-subpane="vulnscan" class="subpane hidden"><div class="map-stage-page" data-stage="vulnscan"></div></div>
     </section>
 
     <!-- DASHBOARD -->
@@ -701,61 +703,31 @@ Accept: */*
       </article>
     </section>
 
-    <!-- DISCOVER -->
-    <section id="view-discover" class="view hidden">
-      <div class="disc-layout" data-split="disc-layout" data-split-dir="h">
-        <div class="disc-form">
-          <h2 data-i18n="disc.title">Paths</h2>
-          <p class="muted" data-i18n="disc.hint">Directory brute-force. Pick any SecLists dictionary (MIT) or paste your own list.</p>
-          <label><span data-i18n="field.baseUrl">Base URL</span> <input id="discBase" placeholder="https://example.com" /></label>
-          <label><span data-i18n="field.workers">Workers</span> <input id="discWorkers" type="number" min="1" max="30" value="10" /></label>
-          <label><span data-i18n="field.rps">RPS</span> <input id="discRps" type="number" min="1" max="50" value="12" /></label>
-          <label><span data-i18n="field.cookies">Cookies</span> <input id="discCookies" data-i18n-placeholder="disc.cookiesPh" placeholder="session=… (optional)" /></label>
-          <label><span data-i18n="disc.search">Search SecLists</span> <input id="discWlSearch" placeholder="common, raft, api…" /></label>
-          <label><span data-i18n="disc.wordlist">Wordlist</span> <select id="discWlSelect" size="8"></select></label>
-          <p class="muted" id="discWlMeta"></p>
-          <label><span data-i18n="disc.orCustom">Or your own list</span> <textarea id="discWords" class="raw" data-i18n-placeholder="disc.customPh" placeholder="if filled, used instead of SecLists"></textarea></label>
-          <button id="btnDiscBuiltin" data-i18n="disc.short">Short built-in</button>
-          <label class="check"><input type="checkbox" id="discAuth" /> <span data-i18n="map.auth">This is my target / lab</span></label>
-          <div class="job-actions">
-            <button id="btnDiscRun" class="primary" data-i18n="disc.start">Start discovery</button>
-            <button id="btnDiscStop" type="button" disabled data-i18n="work.stop">Stop</button>
-            <span id="discMeta" class="muted"></span>
-          </div>
-        </div>
-        <div class="disc-results">
-          <div class="toolbar">
-            <input id="discFilter" data-i18n-placeholder="disc.filterPh" placeholder="filter: path, status" />
-            <label class="check"><input type="checkbox" id="discHide2xx" /> <span data-i18n="disc.hide2xx">Hide 2xx</span></label>
-            <label class="check"><input type="checkbox" id="discHide404" checked /> <span data-i18n="disc.hide404">Hide 404</span></label>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Path</th><th>Status</th><th>Len</th><th>ms</th><th>Error</th></tr></thead>
-              <tbody id="discBody"></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <!-- FUZZ -->
     <section id="view-fuzz" class="view hidden">
       <div class="disc-layout" data-split="fuzz-layout" data-split-dir="h">
         <div class="disc-form">
-          <h2 data-i18n="fuzz.title">Fuzz — generic brute-force</h2>
-          <p class="muted" data-i18n-html="fuzz.hint">Like ffuf: put <code>FUZZ</code> in the URL. Wordlist entries replace it. Lab / own target only.</p>
-          <label><span data-i18n="field.url">URL</span> <input id="fuzzUrl" placeholder="https://app.lab.local/FUZZ" /></label>
-          <label><span data-i18n="field.method">Method</span>
-            <select id="fuzzMethod"><option>GET</option><option>POST</option><option>PUT</option><option>HEAD</option></select>
-          </label>
-          <label><span data-i18n="field.workers">Workers</span> <input id="fuzzWorkers" type="number" min="1" max="30" value="8" /></label>
-          <label><span data-i18n="field.rps">RPS</span> <input id="fuzzRps" type="number" min="1" max="50" value="12" /></label>
-          <label><span data-i18n="fuzz.hide">Hide statuses</span> <input id="fuzzHide" value="404" placeholder="404,400" /></label>
-          <label><span data-i18n="fuzz.body">Body (optional, may contain FUZZ)</span> <textarea id="fuzzBody" class="raw" placeholder=""></textarea></label>
-          <label><span data-i18n="disc.search">Search SecLists</span> <input id="fuzzWlSearch" placeholder="burp-parameter, raft, fuzz…" /></label>
+          <h2 data-i18n="fuzz.title">Fuzz — ffuf</h2>
+          <p class="muted" data-i18n-html="fuzz.hint">Powered by the local ffuf binary. Paths mode dir-busts a base URL; Custom mode replaces FUZZ anywhere in the request. Lab / own target only.</p>
+          <div class="split-btn" id="fuzzModes">
+            <button type="button" data-fuzz-mode="paths" class="active" data-i18n="fuzz.mode.paths">Paths</button>
+            <button type="button" data-fuzz-mode="fuzz" data-i18n="fuzz.mode.fuzz">Custom</button>
+          </div>
+          <label><span id="fuzzUrlLabel" data-i18n="field.baseUrl">Base URL</span> <input id="fuzzUrl" placeholder="https://example.com" /></label>
+          <div id="fuzzAdv" class="hidden">
+            <label><span data-i18n="field.method">Method</span>
+              <select id="fuzzMethod"><option>GET</option><option>POST</option><option>PUT</option><option>HEAD</option></select>
+            </label>
+            <label><span data-i18n="fuzz.body">Body (optional, may contain FUZZ)</span> <textarea id="fuzzBody" class="raw" placeholder=""></textarea></label>
+          </div>
+          <label><span data-i18n="field.cookies">Cookies</span> <input id="fuzzCookies" data-i18n-placeholder="disc.cookiesPh" placeholder="session=… (optional)" /></label>
+          <label><span data-i18n="field.workers">Workers</span> <input id="fuzzWorkers" type="number" min="1" max="200" value="10" /></label>
+          <label><span data-i18n="field.rps">RPS</span> <input id="fuzzRps" type="number" min="0" max="1000" value="0" /></label>
+          <label><span data-i18n="map.opt.timeout">Timeout, s</span> <input id="fuzzTimeout" type="number" min="1" max="120" value="10" /></label>
+          <label><span data-i18n="disc.search">Search SecLists</span> <input id="fuzzWlSearch" placeholder="common, raft, burp…" /></label>
           <label><span data-i18n="disc.wordlist">Wordlist</span> <select id="fuzzWlSelect" size="8"></select></label>
           <p class="muted" id="fuzzWlMeta"></p>
+          <p class="muted" id="fuzzWlPreview"></p>
           <label><span data-i18n="disc.orCustom">Or your own list</span> <textarea id="fuzzWords" class="raw" data-i18n-placeholder="disc.customPh" placeholder="if filled, used instead of SecLists"></textarea></label>
           <div class="toolbar">
             <button id="btnFuzzDirs" data-i18n="fuzz.shortPaths">Short: paths</button>
@@ -769,12 +741,20 @@ Accept: */*
           </div>
         </div>
         <div class="disc-results">
-          <div class="table-wrap">
-            <table>
-              <thead><tr><th>Payload</th><th>Status</th><th>Len</th><th>ms</th><th>URL</th></tr></thead>
-              <tbody id="fuzzBodyRows"></tbody>
-            </table>
+          <div class="toolbar">
+            <input id="fuzzFilter" data-i18n-placeholder="disc.filterPh" placeholder="filter: path, status" />
+            <span class="chips" id="fuzzCodeChips">
+              <button type="button" class="chip" data-code="2xx" title="200, 201, 204…">2xx</button>
+              <button type="button" class="chip" data-code="3xx" title="301, 302, 307…">3xx</button>
+              <button type="button" class="chip" data-code="401">401</button>
+              <button type="button" class="chip" data-code="403">403</button>
+              <button type="button" class="chip off" data-code="404">404</button>
+              <button type="button" class="chip" data-code="500">500</button>
+              <button type="button" class="chip" data-code="503">503</button>
+            </span>
+            <span id="fuzzHiddenMeta" class="muted"></span>
           </div>
+          <div id="fuzzConsole" class="fuzz-console" aria-live="polite"></div>
         </div>
       </div>
     </section>
@@ -906,7 +886,7 @@ Accept: */*
     </div>
   </div>
 </div>
-<script src="/static/i18n.js?v=63"></script>
-<script src="/static/app.js?v=63"></script>
+<script src="/static/i18n.js?v=70"></script>
+<script src="/static/app.js?v=70"></script>
 </body>
 </html>

@@ -179,7 +179,6 @@ function bindJobStop(btn, id) {
   btn?.addEventListener("click", () => Jobs.stop(id));
 }
 $("#btnWorkStop")?.addEventListener("click", () => Jobs.stopAll());
-bindJobStop($("#btnDiscStop"), "discover");
 bindJobStop($("#btnFuzzStop"), "fuzz");
 bindJobStop($("#btnScanStop"), "scanner");
 bindJobStop($("#btnIntrStop"), "intruder");
@@ -220,11 +219,11 @@ const UILayout = {
     uiScale: 100,
     editorScale: 100,
     showTag: true,
-    lastView: "map",
+    lastView: "sitemap",
     lastProxySub: "intercept",
-    lastMapSub: "sitemap",
+    lastMapSub: "subdomains_passive",
     uiLocked: false,
-    tabOrder: ["map", "scope", "proxy", "discover", "fuzz", "intruder", "repeater", "scanner", "logger", "decoder", "comparer", "sequencer", "collaborator", "organizer", "other"],
+    tabOrder: ["sitemap", "scope", "proxy", "fuzz", "intruder", "repeater", "scanner", "logger", "decoder"],
     splits: {
       "proxy-intercept": [22, 78],
       "proxy-history": [46, 54],
@@ -236,7 +235,6 @@ const UILayout = {
       "comparer-main": [58, 42],
       "comparer-grid": [50, 50],
       "seq-layout": [46, 54],
-      "disc-layout": [34, 66],
       "fuzz-layout": [34, 66],
       "scan-layout": [36, 64],
       "org-layout": [22, 78],
@@ -257,8 +255,8 @@ const UILayout = {
     this.data = {
       ...this.defaults,
       ...saved,
-      lastView: saved.lastView === "target" ? "map" : (saved.lastView || this.defaults.lastView),
-      lastMapSub: saved.lastMapSub === "target" ? "sitemap" : (saved.lastMapSub || this.defaults.lastMapSub),
+      lastView: saved.lastView === "target" || saved.lastView === "map" ? "sitemap" : (saved.lastView || this.defaults.lastView),
+      lastMapSub: saved.lastMapSub === "target" || saved.lastMapSub === "sitemap" ? "subdomains_passive" : (saved.lastMapSub || this.defaults.lastMapSub),
       splits: { ...this.defaults.splits, ...(saved.splits || {}) },
       tabOrder: migrateNavOrder(Array.isArray(saved.tabOrder) ? saved.tabOrder : [], this.defaults.tabOrder),
       uiLocked: !!saved.uiLocked,
@@ -662,14 +660,14 @@ function showView(name) {
     requestAnimationFrame(() => UILayout.refresh());
   }
   if (name === "intruder" && typeof intruder !== "undefined" && intruder.tabs.length === 0) newIntruderTab("");
-  if (name === "discover" || name === "fuzz") loadSecLists();
+  if (name === "fuzz") loadSecLists();
   if (name === "map") {
-    loadSiteMap();
     loadMap();
     let sub = UILayout.data && UILayout.data.lastMapSub;
-    if (sub === "target") sub = "sitemap";
-    showSub("#view-map", sub || "sitemap");
+    if (sub === "target" || sub === "sitemap") sub = "subdomains_passive";
+    showSub("#view-map", sub || "subdomains_passive");
   }
+  if (name === "sitemap") { loadSiteMap(); }
   if (name === "dashboard") refreshDashboard();
   if (name === "scope") { renderScope(); }
   if (name === "other") { loadIssues(); renderIssueDefs(); }
@@ -1715,9 +1713,10 @@ function applyHistFilter(f) {
 }
 function hasParams(f) { return (f.path||"").includes("?") || !!(f.request_body && f.request_body.includes("=")); }
 
-/* Discover */
-let discAbort = null;
+/* Fuzz — merged dirbust + generic fuzzing on the ffuf binary */
 let seclists = { items: [], count: 0 };
+let fuzzMode = "paths";
+let fuzzCache = [];
 
 async function loadSecLists() {
   try {
@@ -1727,10 +1726,8 @@ async function loadSecLists() {
   }
   const n = seclists.count || 0;
   const msg = n ? tr("wl.meta", { n }) : tr("wl.missing");
-  if ($("#discWlMeta")) $("#discWlMeta").textContent = msg;
   if ($("#fuzzWlMeta")) $("#fuzzWlMeta").textContent = msg;
-  fillWlSelect($("#discWlSelect"), $("#discWlSearch")?.value, "Discovery/Web-Content/common.txt");
-  fillWlSelect($("#fuzzWlSelect"), $("#fuzzWlSearch")?.value, "Discovery/Web-Content/burp-parameter-names.txt");
+  fillWlSelect($("#fuzzWlSelect"), $("#fuzzWlSearch")?.value, fuzzMode === "paths" ? "Discovery/Web-Content/common.txt" : "Discovery/Web-Content/burp-parameter-names.txt");
 }
 
 function fillWlSelect(sel, q, prefer) {
@@ -1752,53 +1749,236 @@ function fillWlSelect(sel, q, prefer) {
   }
 }
 
-$("#btnDiscRun").addEventListener("click", async () => {
-  const base = $("#discBase").value.trim();
-  const custom = $("#discWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
-  const path = $("#discWlSelect")?.value || "";
-  if (!base || (custom.length === 0 && !path)) { uiFlash(tr("disc.need")); return; }
-  if (!requireLabAuth($("#discAuth"))) return;
-  $("#discBody").innerHTML = "";
-  try {
-    const data = await runJob("discover", {
-      label: tr("work.discover"),
-      runBtn: $("#btnDiscRun"),
-      stopBtn: $("#btnDiscStop"),
-      meta: $("#discMeta"),
-      fn: (signal) => api("/api/discover/run", { method: "POST", signal, body: JSON.stringify({
-        base_url: base, wordlist: custom, wordlist_path: custom.length ? "" : path,
-        workers: +$("#discWorkers").value || 10,
-        rps: +$("#discRps").value || 20, cookies: $("#discCookies").value,
-        authorized: true,
-      }) }),
-    });
-    if (!data || data.aborted) return;
-    discCache = data || [];
-    renderDisc(discCache);
-    $("#discMeta").textContent = tr("disc.nResults", { n: discCache.length });
-  } catch (e) { uiFlash(e.message); $("#discMeta").textContent = ""; }
-});
-function renderDisc(rows) {
-  const q = ($("#discFilter").value || "").toLowerCase();
-  const hide2 = $("#discHide2xx").checked, hide404 = $("#discHide404").checked;
-  const out = rows.filter((r) => {
-    if (hide2 && r.status_code >= 200 && r.status_code < 300) return false;
-    if (hide404 && r.status_code === 404) return false;
-    if (q && !(`${r.path} ${r.status_code}`.toLowerCase().includes(q))) return false;
-    return true;
-  });
-  $("#discBody").innerHTML = out.map((r) => `<tr>
-    <td>${esc(r.path)}</td>
-    <td class="${statusClass(r.status_code)}">${r.status_code||"—"}</td>
-    <td>${r.length||0}</td>
-    <td>${r.duration ? (r.duration/1e6).toFixed(0) : "—"}</td>
-    <td class="${r.error?"status-red":""}">${esc(r.error||"")}</td>
-  </tr>`).join("") || `<tr><td colspan="5" class="muted">${tr("empty.results")}</td></tr>`;
+function setFuzzMode(mode) {
+  fuzzMode = mode === "fuzz" ? "fuzz" : "paths";
+  $$("#fuzzModes button").forEach((b) => b.classList.toggle("active", b.dataset.fuzzMode === fuzzMode));
+  $("#fuzzAdv")?.classList.toggle("hidden", fuzzMode !== "fuzz");
+  const url = $("#fuzzUrl");
+  if (url) url.placeholder = fuzzMode === "paths" ? "https://example.com" : "https://app.lab.local/FUZZ";
+  const lbl = $("#fuzzUrlLabel");
+  if (lbl) lbl.textContent = tr(fuzzMode === "paths" ? "field.baseUrl" : "field.url");
+  fillWlSelect($("#fuzzWlSelect"), $("#fuzzWlSearch")?.value, fuzzMode === "paths" ? "Discovery/Web-Content/common.txt" : "Discovery/Web-Content/burp-parameter-names.txt");
 }
-$("#discFilter").addEventListener("input", () => { if (discCache.length) renderDisc(discCache); });
-$("#discHide2xx").addEventListener("change", () => { if (discCache.length) renderDisc(discCache); });
-$("#discHide404").addEventListener("change", () => { if (discCache.length) renderDisc(discCache); });
-let discCache = [];
+$("#fuzzModes")?.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-fuzz-mode]");
+  if (b) setFuzzMode(b.dataset.fuzzMode);
+});
+
+/* --- gobuster-style live console -------------------------------------- */
+const FUZZ_HIDDEN_DEFAULT = ["404"];
+let fuzzHidden = new Set(FUZZ_HIDDEN_DEFAULT);
+let fuzzFound = 0;      // results that passed the hide filters
+let fuzzHiddenN = 0;    // results hidden by chips/filter
+let fuzzStats = null;
+let fuzzRunning = false;
+
+function fuzzStatusClass(s) {
+  if (!s || s >= 500 || (s >= 400 && s !== 401 && s !== 403)) return "status-red";
+  if (s === 401 || s === 403) return "status-warn";
+  if (s >= 300) return "status-3";
+  return "status-ok";
+}
+
+function fuzzPassesHide(r) {
+  const s = r.status || 0;
+  if (fuzzHidden.has(String(s))) return false;
+  if (s >= 200 && s < 300 && fuzzHidden.has("2xx")) return false;
+  if (s >= 300 && s < 400 && fuzzHidden.has("3xx")) return false;
+  return true;
+}
+
+function fuzzPassesFilter(r) {
+  const q = ($("#fuzzFilter")?.value || "").toLowerCase();
+  if (!q) return true;
+  return `${r.payload} ${r.status} ${r.url}`.toLowerCase().includes(q);
+}
+
+function fuzzConsoleEl() { return $("#fuzzConsole"); }
+
+function fuzzConsoleClear() {
+  fuzzCache = [];
+  fuzzFound = 0;
+  fuzzHiddenN = 0;
+  fuzzStats = null;
+  const c = fuzzConsoleEl();
+  if (c) c.innerHTML = "";
+  updateFuzzHiddenMeta();
+}
+
+function fuzzNearBottom() {
+  const c = fuzzConsoleEl();
+  if (!c) return true;
+  return c.scrollHeight - c.scrollTop - c.clientHeight < 60;
+}
+
+function fuzzScroll() {
+  const c = fuzzConsoleEl();
+  if (c) c.scrollTop = c.scrollHeight;
+}
+
+function consoleDiv(cls, html) {
+  const c = fuzzConsoleEl();
+  if (!c) return;
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.innerHTML = html;
+  c.appendChild(d);
+  if (fuzzNearBottom()) fuzzScroll();
+}
+
+function updateFuzzHiddenMeta() {
+  const el = $("#fuzzHiddenMeta");
+  if (!el) return;
+  el.textContent = fuzzHiddenN > 0 ? tr("fuzz.hiddenNote", { n: fuzzHiddenN }) : "";
+}
+
+function fuzzResultLine(r) {
+  const st = r.status || "—";
+  const size = r.length ?? "—";
+  const words = r.words != null ? ` [Words: ${r.words}]` : "";
+  const redirect = r.redirect ? ` → ${esc(r.redirect)}` : "";
+  return `<span class="fx-plus">+</span> <span class="fx-path">${esc(r.payload)}</span> <span class="${fuzzStatusClass(r.status)}">(Status: ${st})</span> <span class="fx-size">[Size: ${size}]</span>${words}<span class="muted">${redirect}</span>`;
+}
+
+function fuzzRenderHeader(ev) {
+  const rule = `<div class="fx-rule">${"=".repeat(60)}</div>`;
+  const row = (k, v) => `<div><span class="fx-k">[+] ${k}:</span> <span class="fx-v">${esc(String(v))}</span></div>`;
+  const c = fuzzConsoleEl();
+  if (!c) return;
+  c.innerHTML =
+    rule +
+    `<div class="fx-title">${esc(tr("fuzz.consoleTitle"))}</div>` +
+    rule +
+    row(tr("field.url"), ev.url) +
+    (ev.mode === "fuzz" ? row(tr("field.method"), ev.method || "GET") : "") +
+    row(tr("disc.wordlist"), `${ev.wordlist} (${ev.words})`) +
+    row(tr("field.workers"), ev.workers) +
+    row(tr("map.opt.timeout"), `${ev.timeout || 10}s`) +
+    row(tr("field.rps"), ev.rps > 0 ? ev.rps : tr("fuzz.rpsUnlimited")) +
+    rule;
+}
+
+function fuzzFooterText() {
+  if (fuzzStats) {
+    return tr("fuzz.footerDone", {
+      found: fuzzStats.count,
+      tried: fuzzStats.tried || fuzzStats.count,
+      errors: fuzzStats.errors || 0,
+      sec: ((fuzzStats.duration_ms || 0) / 1000).toFixed(1),
+    });
+  }
+  return tr("fuzz.footerRunning", { found: fuzzFound, errors: fuzzStats?.errors || 0 });
+}
+
+function fuzzUpdateFooter() {
+  let f = $("#fuzzFooter");
+  if (!f) {
+    const c = fuzzConsoleEl();
+    if (!c) return;
+    f = document.createElement("div");
+    f.id = "fuzzFooter";
+    f.className = "fx-footer";
+    c.appendChild(f);
+  }
+  f.textContent = fuzzFooterText();
+  if (fuzzNearBottom()) fuzzScroll();
+}
+
+function handleFuzzEvent(ev) {
+  if (!ev || !ev.type) return;
+  if (ev.type === "start") {
+    fuzzRenderHeader(ev);
+    fuzzUpdateFooter();
+    return;
+  }
+  if (ev.type === "result") {
+    fuzzCache.push(ev);
+    if (fuzzPassesHide(ev) && fuzzPassesFilter(ev)) {
+      fuzzFound++;
+      consoleDiv("fx-res", fuzzResultLine(ev));
+    } else {
+      fuzzHiddenN++;
+    }
+    updateFuzzHiddenMeta();
+    fuzzUpdateFooter();
+    return;
+  }
+  if (ev.type === "done") {
+    fuzzStats = ev;
+    fuzzUpdateFooter();
+  }
+}
+
+function rerenderFuzzConsole() {
+  const c = fuzzConsoleEl();
+  if (!c) return;
+  // Header = leading rule/title/config divs up to the first result line.
+  const headerNodes = [];
+  for (const n of c.children) {
+    if (n.id === "fuzzFooter" || n.classList.contains("fx-res")) break;
+    headerNodes.push(n);
+  }
+  c.innerHTML = "";
+  headerNodes.forEach((n) => c.appendChild(n));
+  fuzzFound = 0;
+  fuzzHiddenN = 0;
+  const frag = document.createDocumentFragment();
+  for (const r of fuzzCache) {
+    if (fuzzPassesHide(r) && fuzzPassesFilter(r)) {
+      fuzzFound++;
+      const d = document.createElement("div");
+      d.className = "fx-res";
+      d.innerHTML = fuzzResultLine(r);
+      frag.appendChild(d);
+    } else {
+      fuzzHiddenN++;
+    }
+  }
+  c.appendChild(frag);
+  updateFuzzHiddenMeta();
+  fuzzUpdateFooter();
+  fuzzScroll();
+}
+
+$("#fuzzCodeChips")?.addEventListener("click", (e) => {
+  const b = e.target.closest("button.chip");
+  if (!b) return;
+  const code = b.dataset.code;
+  if (fuzzHidden.has(code)) {
+    fuzzHidden.delete(code);
+    b.classList.remove("off");
+  } else {
+    fuzzHidden.add(code);
+    b.classList.add("off");
+  }
+  rerenderFuzzConsole();
+});
+$("#fuzzFilter")?.addEventListener("input", () => rerenderFuzzConsole());
+
+/* Wordlist preview: teach what a wordlist is — a file of candidate words. */
+async function updateWlPreview() {
+  const el = $("#fuzzWlPreview");
+  if (!el) return;
+  const custom = ($("#fuzzWords")?.value || "").split("\n").map((s) => s.trim()).filter(Boolean);
+  if (custom.length) {
+    el.textContent = tr("fuzz.wlCustom", { n: custom.length });
+    return;
+  }
+  const path = $("#fuzzWlSelect")?.value || "";
+  if (!path) {
+    el.textContent = "";
+    return;
+  }
+  try {
+    const d = await api("/api/wordlists/preview?path=" + encodeURIComponent(path));
+    const sample = (d.preview || []).slice(0, 8).join(", ");
+    el.textContent = tr("fuzz.wlPreview", { n: d.lines, sample }) + (d.lines > 8 ? " …" : "");
+  } catch (_) {
+    el.textContent = "";
+  }
+}
+$("#fuzzWlSelect")?.addEventListener("change", updateWlPreview);
+$("#fuzzWords")?.addEventListener("input", updateWlPreview);
 
 /* Scanner */
 function rawGetFromTarget(target) {
@@ -2360,8 +2540,8 @@ function renderMapStagePanes() {
       <div class="toolbar job-actions">
         <button type="button" class="primary${busy ? " is-busy" : ""}" data-run="${c.id}" ${busy || !ready ? "disabled" : ""}>${busy ? `<span class="spin"></span>${tr("map.running")}` : tr("map.run")}</button>
         <button type="button" class="danger" data-stop="${c.id}" ${busy ? "" : "disabled"}>${tr("map.stop")}</button>
-        ${c.id === "dirs" ? `<button type="button" data-jump="discover">${tr("map.openPaths")}</button>` : ""}
-        ${c.id === "params" ? `<button type="button" data-jump="fuzz">${tr("map.openFuzz")}</button>` : ""}
+        ${c.id === "dirs" ? `<button type="button" data-jump="fuzz" data-fuzz-mode="paths">${tr("map.openPaths")}</button>` : ""}
+        ${c.id === "params" ? `<button type="button" data-jump="fuzz" data-fuzz-mode="fuzz">${tr("map.openFuzz")}</button>` : ""}
       </div>
       <pre class="map-log map-stage-log" data-empty="${esc(tr("map.logIdle"))}"></pre>
       ${c.id === "vulnscan" ? renderVulnFindings(status) : ""}`;
@@ -2441,7 +2621,7 @@ $("#mapForm").addEventListener("submit", async (e) => {
   markBusy(startBtn, true, tr("map.starting"));
   try {
     await createMapTargetFromForm();
-    showSub("#view-map", "sitemap");
+    showView("sitemap");
   } catch (err) { uiFlash(err.message); }
   finally {
     markBusy(startBtn, false);
@@ -2550,7 +2730,11 @@ $("#view-map").addEventListener("input", (e) => {
 });
 $("#view-map").addEventListener("click", async (e) => {
   const jump = e.target.closest("[data-jump]");
-  if (jump) { showView(jump.dataset.jump); return; }
+  if (jump) {
+    if (jump.dataset.jump === "fuzz" && jump.dataset.fuzzMode) setFuzzMode(jump.dataset.fuzzMode);
+    showView(jump.dataset.jump);
+    return;
+  }
   const stop = e.target.closest("[data-stop]");
   if (stop) {
     const stageId = stop.dataset.stop;
@@ -2579,23 +2763,19 @@ $("#btnMapRefresh").addEventListener("click", async () => {
 });
 $("#btnMapLogClear")?.addEventListener("click", () => MapLog.clear());
 
-$("#btnDiscBuiltin")?.addEventListener("click", async () => {
-  const w = await api("/api/wordlists");
-  $("#discWords").value = (w.dirs || []).join("\n");
-});
-$("#discWlSearch")?.addEventListener("input", () => fillWlSelect($("#discWlSelect"), $("#discWlSearch").value));
-$("#fuzzWlSearch")?.addEventListener("input", () => fillWlSelect($("#fuzzWlSelect"), $("#fuzzWlSearch").value));
-
 $("#btnFuzzDirs")?.addEventListener("click", async () => {
   const w = await api("/api/wordlists");
   $("#fuzzWords").value = (w.dirs || []).join("\n");
-  if (!$("#fuzzUrl").value) $("#fuzzUrl").value = "https://example.com/FUZZ";
+  setFuzzMode("paths");
+  if (!$("#fuzzUrl").value) $("#fuzzUrl").value = "https://example.com";
 });
 $("#btnFuzzParams")?.addEventListener("click", async () => {
   const w = await api("/api/wordlists");
   $("#fuzzWords").value = (w.params || []).join("\n");
+  setFuzzMode("fuzz");
   if (!$("#fuzzUrl").value.includes("FUZZ")) $("#fuzzUrl").value = "https://example.com/?FUZZ=1";
 });
+$("#fuzzWlSearch")?.addEventListener("input", () => fillWlSelect($("#fuzzWlSelect"), $("#fuzzWlSearch").value));
 function requireLabAuth(box) {
   if (box && box.checked) return true;
   uiFlash(tr("lab.needAuth"));
@@ -2603,44 +2783,79 @@ function requireLabAuth(box) {
   return false;
 }
 
+// Streams POST /api/fuzz/run (NDJSON) into the gobuster-style console.
+async function fuzzRunStream(payload, signal) {
+  const res = await fetch("/api/fuzz/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal,
+  });
+  if (!res.ok) {
+    let msg = res.status + " " + res.statusText;
+    try {
+      const j = await res.json();
+      if (j && j.detail) msg = j.detail;
+    } catch (_) {}
+    throw new Error(msg);
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, i);
+      buf = buf.slice(i + 1);
+      if (!line.trim()) continue;
+      let ev;
+      try { ev = JSON.parse(line); } catch (_) { continue; }
+      handleFuzzEvent(ev);
+    }
+  }
+}
+
 $("#btnFuzzRun")?.addEventListener("click", async () => {
-  const hide = ($("#fuzzHide").value || "").split(",").map((s) => Number(s.trim())).filter(Boolean);
   const custom = $("#fuzzWords").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const path = $("#fuzzWlSelect")?.value || "";
+  const url = $("#fuzzUrl").value.trim();
+  if (!url || (custom.length === 0 && !path)) { uiFlash(tr("disc.need")); return; }
   if (!requireLabAuth($("#fuzzAuth"))) return;
+  fuzzConsoleClear();
+  fuzzRunning = true;
+  const mode = fuzzMode;
   try {
-    const data = await runJob("fuzz", {
+    await runJob("fuzz", {
       label: tr("work.fuzz"),
       runBtn: $("#btnFuzzRun"),
       stopBtn: $("#btnFuzzStop"),
       meta: $("#fuzzMeta"),
-      fn: (signal) => api("/api/fuzz/run", {
-        method: "POST",
-        signal,
-        body: JSON.stringify({
-          url: $("#fuzzUrl").value.trim(),
-          method: $("#fuzzMethod").value,
-          body: $("#fuzzBody").value,
-          wordlist: custom,
-          wordlist_path: custom.length ? "" : path,
-          workers: Number($("#fuzzWorkers").value),
-          rps: Number($("#fuzzRps").value),
-          hide,
-          authorized: true,
-        }),
-      }),
+      fn: (signal) => fuzzRunStream({
+        mode,
+        url,
+        method: $("#fuzzMethod").value,
+        body: mode === "fuzz" ? $("#fuzzBody").value : "",
+        cookies: $("#fuzzCookies").value,
+        wordlist: custom,
+        wordlist_path: custom.length ? "" : path,
+        wordlist_name: mode === "paths" ? "dirs" : "params",
+        workers: Number($("#fuzzWorkers").value),
+        rps: Number($("#fuzzRps").value),
+        timeout: Number($("#fuzzTimeout").value),
+        authorized: true,
+      }, signal),
     });
-    if (!data || data.aborted) return;
-    const items = data.items || [];
-    $("#fuzzBodyRows").innerHTML = items.map((h) => `<tr>
-      <td>${esc(h.payload)}</td>
-      <td class="${statusClass(h.status_code)}">${h.status_code || "—"}</td>
-      <td>${h.length ?? "—"}</td>
-      <td>${Math.round((h.duration || 0) / 1e6)}</td>
-      <td title="${esc(h.url)}">${esc((h.url || "").slice(0, 80))}</td>
-    </tr>`).join("") || `<tr><td colspan="5" class="muted">${tr("empty.hits")}</td></tr>`;
-    $("#fuzzMeta").textContent = `${items.length} hits / ${data.tried || items.length} tried` + (data.truncated ? tr("fuzz.truncated") : "");
-  } catch (err) { $("#fuzzMeta").textContent = err.message; }
+    if (fuzzStats) {
+      const parts = [`${fuzzStats.count} / ${fuzzStats.tried || fuzzStats.count}`];
+      if (fuzzStats.errors) parts.push(tr("fuzz.errors", { n: fuzzStats.errors }));
+      if (fuzzStats.truncated) parts.push(tr("fuzz.truncated"));
+      $("#fuzzMeta").textContent = parts.join(" · ");
+    }
+  } catch (err) { uiFlash(err.message); $("#fuzzMeta").textContent = ""; }
+  finally { fuzzRunning = false; }
 });
 
 function refreshTranslatedUI() {
@@ -2652,7 +2867,7 @@ function refreshTranslatedUI() {
   try { renderScope(); } catch (_) {}
   try { renderExt(); } catch (_) {}
   try { renderIssueDefs(); } catch (_) {}
-  try { if (typeof discCache !== "undefined") renderDisc(discCache); } catch (_) {}
+  try { if (typeof fuzzCache !== "undefined") rerenderFuzzConsole(); } catch (_) {}
   try { if (typeof loadSecLists === "function") loadSecLists(); } catch (_) {}
   const detail = $("#mapDetail");
   if (detail && !detail.querySelector("strong")) detail.textContent = tr("map.pickNode");
@@ -2672,7 +2887,7 @@ $$("#langSwitch button").forEach((b) => b.addEventListener("click", () => applyL
 (function bootView() {
   const allowed = new Set($$("#mainTabs button").filter((b) => !b.hidden && !b.classList.contains("hidden")).map((b) => b.dataset.view));
   const last = UILayout.data && UILayout.data.lastView;
-  showView(allowed.has(last) ? last : "map");
+  showView(allowed.has(last) ? last : "sitemap");
   const sub = UILayout.data && UILayout.data.lastProxySub;
   if (sub && sub !== "settings") showSub("#view-proxy", sub);
 })();

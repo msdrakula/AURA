@@ -171,14 +171,17 @@ func TestMapModulesAndNav(t *testing.T) {
 	if !strings.Contains(html, `id="view-scope"`) || !strings.Contains(html, `id="view-other"`) {
 		t.Fatal("missing #view-scope / #view-other")
 	}
-	if !strings.Contains(html, `id="mapSubtabs"`) || !strings.Contains(html, `data-sub="sitemap"`) || !strings.Contains(html, `data-sub="subdomains_passive"`) {
-		t.Fatal("Map must nest Site map and modules like Proxy subtabs")
+	if !strings.Contains(html, `id="mapSubtabs"`) || !strings.Contains(html, `data-sub="subdomains_passive"`) {
+		t.Fatal("Map must nest its modules like Proxy subtabs")
+	}
+	if !strings.Contains(html, `data-view="sitemap"`) || !strings.Contains(html, `id="view-sitemap"`) {
+		t.Fatal("Site map must be a main tab with its own view")
 	}
 	if strings.Contains(html, `id="otherSubtabs"`) || strings.Contains(html, `data-i18n="other.sitemap"`) {
-		t.Fatal("Site map belongs on Map, not Other")
+		t.Fatal("Site map belongs in its own view, not Other")
 	}
-	if !strings.Contains(html, `id="siteTree"`) || !strings.Contains(html, `data-subpane="sitemap"`) {
-		t.Fatal("Site map tree must live in the first Map subtab")
+	if !strings.Contains(html, `id="siteTree"`) || !strings.Contains(html, `id="view-sitemap"`) {
+		t.Fatal("Site map tree must live in the Site map view")
 	}
 	if !strings.Contains(html, `class="map-stage-page" data-stage="dirs"`) {
 		t.Fatal("each Map module needs its own subpane")
@@ -252,7 +255,7 @@ func TestHTMLI18nKeysExist(t *testing.T) {
 func TestLabConfirmWiredOnActiveTools(t *testing.T) {
 	html := readWeb(t, "index.html")
 	js := readWeb(t, "static/app.js")
-	for _, id := range []string{`id="discAuth"`, `id="fuzzAuth"`, `id="scanAuth"`} {
+	for _, id := range []string{`id="fuzzAuth"`, `id="scanAuth"`} {
 		if !strings.Contains(html, id) {
 			t.Fatalf("missing %s", id)
 		}
@@ -265,7 +268,6 @@ func TestLabConfirmWiredOnActiveTools(t *testing.T) {
 	}
 	for _, needle := range []string{
 		`authorized: true`,
-		`$("#discAuth")`,
 		`$("#fuzzAuth")`,
 		`$("#scanAuth")`,
 	} {
@@ -342,4 +344,28 @@ func i18nKeys(t *testing.T, src, lang string) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func TestFuzzConsoleWired(t *testing.T) {
+	html := readWeb(t, "index.html")
+	js := readWeb(t, "static/app.js")
+	for _, id := range []string{`id="fuzzConsole"`, `id="fuzzCodeChips"`, `id="fuzzWlPreview"`, `id="fuzzFilter"`} {
+		if !strings.Contains(html, id) {
+			t.Fatalf("missing %s", id)
+		}
+	}
+	for _, needle := range []string{"fuzzRunStream", "handleFuzzEvent", "rerenderFuzzConsole", `fetch("/api/fuzz/run"`} {
+		if !strings.Contains(js, needle) {
+			t.Fatalf("app.js missing %s", needle)
+		}
+	}
+	// Chips must cover the common statuses and default to hiding 404.
+	for _, code := range []string{`data-code="2xx"`, `data-code="3xx"`, `data-code="401"`, `data-code="403"`, `data-code="404"`, `data-code="500"`, `data-code="503"`} {
+		if !strings.Contains(html, code) {
+			t.Fatalf("missing hide chip %s", code)
+		}
+	}
+	if !strings.Contains(html, `class="chip off" data-code="404"`) {
+		t.Fatal("404 chip must start in the off (hidden) state")
+	}
 }

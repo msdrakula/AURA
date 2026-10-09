@@ -51,6 +51,16 @@ func (s *statusRecorder) Write(p []byte) (int, error) {
 	return s.ResponseWriter.Write(p)
 }
 
+// Flush passes flushing through so streaming handlers (fuzz NDJSON) work.
+func (s *statusRecorder) Flush() {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func withDebug(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/ws" || r.URL.Path == "/api/debug-log" {

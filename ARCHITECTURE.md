@@ -7,8 +7,9 @@ Independent local intercepting proxy plus a guided application map (Advanced URL
 - `cmd/server/main.go` — process wiring (proxy, API, callback, intel).
 - `internal/proxy/` — HTTP/1.1 MITM and intercept.
 - `internal/intel/` — mindmap stages, artifacts, application map.
-- `internal/fuzz/` — FUZZ-keyword HTTP fuzzer.
-- `internal/discover/` — directory discovery.
+- `internal/ffuf/` — ffuf binary wrapper behind the merged Fuzz tab (dirbust + FUZZ-keyword modes, NDJSON streaming to the console UI).
+- `internal/fuzz/` — FUZZ-keyword HTTP fuzzer (classic engine, still used by Map stages).
+- `internal/discover/` — directory discovery (still used by Map stages).
 - `internal/wordlist/` — small built-in dictionaries.
 - `internal/extractor/` — HTML/JS URL harvest (used by intel scrape).
 - `internal/repeater/`, `internal/batch/` — single and bulk request senders.

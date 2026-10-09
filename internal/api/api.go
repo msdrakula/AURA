@@ -118,7 +118,6 @@ func New(opts Options) http.Handler {
 	mux.HandleFunc("POST /api/organizer", s.organizerAdd)
 	mux.HandleFunc("PATCH /api/organizer/{id}", s.organizerUpdate)
 	mux.HandleFunc("DELETE /api/organizer/{id}", s.organizerDelete)
-	mux.HandleFunc("POST /api/discover/run", s.discoverRun)
 	mux.HandleFunc("POST /api/scanner/scan", s.scannerRun)
 	mux.HandleFunc("GET /api/intel/catalog", s.intelCatalog)
 	mux.HandleFunc("GET /api/intel/targets", s.intelList)
